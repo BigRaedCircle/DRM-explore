@@ -15,46 +15,46 @@ from layered_emulator import LayeredEmulator
 
 
 def test_pe_emulation():
-    """Тест запуска PE-файла"""
+    """Test PE file execution"""
     print("=" * 70)
-    print("ТЕСТ: Запуск PE-файла в расслоенной эмуляции")
+    print("TEST: Running PE file in layered emulation")
     print("=" * 70)
     print()
     
-    # Создаём эмулятор
-    print("[*] Инициализация расслоенного эмулятора...")
+    # Create emulator
+    print("[*] Initializing layered emulator...")
     emu = LayeredEmulator(cpu_freq_mhz=3000)
     
-    # Загружаем PE
+    # Load PE
     pe_path = "demos/time_check_demo.exe"
     try:
         entry_point = emu.load_pe(pe_path)
     except FileNotFoundError:
-        print(f"\n[!] Файл {pe_path} не найден")
-        print("[!] Сначала скомпилируйте: gcc -O2 demos/time_check_demo.c -o demos/time_check_demo.exe")
+        print(f"\n[!] File {pe_path} not found")
+        print("[!] Compile first: gcc -O2 demos/time_check_demo.c -o demos/time_check_demo.exe")
         return False
     except Exception as e:
-        print(f"\n[!] Ошибка загрузки PE: {e}")
+        print(f"\n[!] PE loading error: {e}")
         return False
     
-    # Запускаем
-    print("\n[*] Запуск эмуляции...")
+    # Run
+    print("\n[*] Starting emulation...")
     exit_code = emu.run(entry_point)
     
-    print(f"\n[*] Код возврата: {exit_code}")
+    print(f"\n[*] Exit code: {exit_code}")
     
     if exit_code == 0:
-        print("\n[OK] SUCCESS! PE-файл выполнен успешно")
-        print("[OK] Анти-тампер НЕ детектировал эмуляцию")
+        print("\n[OK] SUCCESS! PE file executed successfully")
+        print("[OK] Anti-tamper did NOT detect emulation")
         return True
     elif exit_code == 1:
-        print("\n[!] Анти-тампер детектировал эмуляцию")
+        print("\n[!] Anti-tamper detected emulation")
         return False
     elif exit_code == 2:
-        print("\n[!] Невалидная лицензия (ожидаемо — не передали ключ)")
-        return True  # Это нормально для теста
+        print("\n[!] Invalid license (expected - no key passed)")
+        return True  # This is normal for test
     else:
-        print(f"\n[?] Неожиданный код возврата: {exit_code}")
+        print(f"\n[?] Unexpected exit code: {exit_code}")
         return False
 
 

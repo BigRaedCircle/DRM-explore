@@ -20,43 +20,45 @@ class PELoader:
         self.entry_point = 0
     
     def load(self, filepath):
-        """Загрузить PE-файл в память эмулятора"""
-        print(f"[*] Загрузка PE: {filepath}")
+        """Load PE file into emulator memory"""
+        print(f"[*] Loading PE: {filepath}")
         
-        # Парсим PE
+        # Parse PE
         self.pe = pefile.PE(filepath)
         
-        # Получаем базовый адрес и точку входа
+        # Get base address and entry point
         self.image_base = self.pe.OPTIONAL_HEADER.ImageBase
         self.entry_point = self.image_base + self.pe.OPTIONAL_HEADER.AddressOfEntryPoint
         
         print(f"[*] ImageBase: 0x{self.image_base:x}")
         print(f"[*] EntryPoint: 0x{self.entry_point:x}")
-        print(f"[*] Секций: {self.pe.FILE_HEADER.NumberOfSections}")
+        print(f"[*] Sections: {self.pe.FILE_HEADER.NumberOfSections}")
         
-        # Выделяем память под образ (если ещё не выделена)
+        # Allocate memory for image
         image_size = self.pe.OPTIONAL_HEADER.SizeOfImage
         try:
             self.emu.uc.mem_map(self.image_base, image_size)
-            print(f"[*] Выделено памяти: {image_size:,} байт")
+            print(f"[*] Allocated memory: {image_size:,} bytes")
         except:
-            print(f"[*] Память уже выделена (используем существующую)")
+            print(f"[*] Memory already allocated")
         
-        # Загружаем секции
+        # Load sections
         self._load_sections()
         
-        # Обрабатываем импорты (патчим IAT)
+        # Process imports (patch IAT)
         self._process_imports()
         
-        # Настраиваем стек
+        # Setup stack
         self._setup_stack()
         
-        print(f"[OK] PE загружен успешно\n")
+        print(f"[OK] PE loaded successfully\n")
         return self.entry_point
     
     def _load_sections(self):
-        """Загрузить все секции в память"""
-        print(f"\n[*] Загрузка секций:")
+        """Load all sections into memory"""
+        print(f"\n[*] Loading sections:")
+        
+        from unicorn import UC_PROT_ALL
         
         for section in self.pe.sections:
             name = section.Name.decode('ascii', errors='ignore').strip('\x00')
@@ -65,37 +67,24 @@ class PELoader:
             data = section.get_data()
             
             if data:
+                # Write section data
+                # Use UC_PROT_ALL to allow IAT patching
                 self.emu.uc.mem_write(va, data)
-                print(f"    {name:<12} 0x{va:x}  {len(data):,} байт")
+                print(f"    {name:<12} 0x{va:x}  {len(data):,} bytes")
     
     def _process_imports(self):
-        """Обработать импорты и патчить IAT"""
-        print(f"\n[*] Обработка импортов:")
+        """Process imports and patch IAT"""
+        print(f"\n[*] Processing imports:")
         
         if not hasattr(self.pe, 'DIRECTORY_ENTRY_IMPORT'):
-            print("    [!] Нет импортов")
+            print("    [!] No imports")
             return
         
         import_count = 0
         patched_count = 0
         
-        # Сначала находим диапазон адресов IAT и выделяем память
-        iat_addresses = []
-        for entry in self.pe.DIRECTORY_ENTRY_IMPORT:
-            for imp in entry.imports:
-                iat_addresses.append(self.image_base + imp.address)
-        
-        if iat_addresses:
-            min_iat = min(iat_addresses)
-            max_iat = max(iat_addresses) + 8
-            iat_size = ((max_iat - min_iat + 0xFFF) // 0x1000) * 0x1000  # Выравнивание
-            
-            # Выделяем память для IAT если нужно
-            try:
-                self.emu.uc.mem_map(min_iat, iat_size)
-                print(f"    [*] Выделено для IAT: 0x{min_iat:x} - 0x{max_iat:x} ({iat_size:,} байт)")
-            except:
-                print(f"    [*] IAT уже в выделенной памяти")
+        # IAT is already loaded in sections (.rdata or .idata)
+        # No need to allocate additional memory
         
         for entry in self.pe.DIRECTORY_ENTRY_IMPORT:
             dll_name = entry.dll.decode('ascii', errors='ignore')
@@ -105,38 +94,42 @@ class PELoader:
                 import_count += 1
                 func_name = imp.name.decode('ascii', errors='ignore') if imp.name else f"Ordinal_{imp.ordinal}"
                 
-                # Получаем адрес в IAT
-                iat_address = self.image_base + imp.address
+                # imp.address already contains absolute address (not RVA!)
+                iat_address = imp.address
                 
-                # Проверяем, есть ли заглушка для этой функции
+                # Check if we have a stub for this function
                 stub_addr = self.emu.winapi.get_stub_address(func_name)
                 
                 if stub_addr:
-                    # Патчим IAT — записываем адрес заглушки
+                    # Patch IAT - write stub address
                     try:
                         self.emu.uc.mem_write(iat_address, stub_addr.to_bytes(8, 'little'))
                         patched_count += 1
                         print(f"      [+] {func_name:<30} @ 0x{iat_address:x} -> 0x{stub_addr:x}")
                     except Exception as e:
-                        print(f"      [-] {func_name:<30} @ 0x{iat_address:x} (ошибка патчинга: {e})")
+                        print(f"      [-] {func_name:<30} @ 0x{iat_address:x} (patch error: {e})")
                 else:
-                    # Заглушки нет — создаём dummy stub
+                    # No stub - create dummy stub
                     dummy_stub = self._create_dummy_stub(func_name)
                     try:
                         self.emu.uc.mem_write(iat_address, dummy_stub.to_bytes(8, 'little'))
                         print(f"      [?] {func_name:<30} @ 0x{iat_address:x} -> dummy")
                     except Exception as e:
-                        print(f"      [-] {func_name:<30} @ 0x{iat_address:x} (ошибка: {e})")
+                        print(f"      [-] {func_name:<30} @ 0x{iat_address:x} (error: {e})")
         
-        print(f"\n    [*] Импортов: {import_count}, патчено: {patched_count}")
+        print(f"\n    [*] Imports: {import_count}, patched: {patched_count}")
     
     def _create_dummy_stub(self, func_name):
-        """Создать dummy заглушку для неизвестной функции"""
-        # Выделяем адрес в области заглушек
-        # Для простоты возвращаем адрес в конце области WinAPI stubs
-        dummy_base = self.emu.winapi.STUB_BASE + 0xF000
+        """Create dummy stub for unknown function"""
+        # Allocate unique address for each stub
+        # Use counter to create unique addresses
+        if not hasattr(self, '_dummy_stub_counter'):
+            self._dummy_stub_counter = 0
         
-        # Записываем простую заглушку: MOV RAX, 0; RET
+        dummy_base = self.emu.winapi.STUB_BASE + 0xF000 + (self._dummy_stub_counter * 16)
+        self._dummy_stub_counter += 1
+        
+        # Write simple stub: XOR RAX, RAX; RET
         stub_code = bytes([
             0x48, 0x31, 0xC0,  # XOR RAX, RAX
             0xC3,              # RET
@@ -144,21 +137,21 @@ class PELoader:
         
         try:
             self.emu.uc.mem_write(dummy_base, stub_code)
-        except:
-            pass  # Память уже выделена
+        except Exception as e:
+            print(f"      [!] Error writing dummy stub: {e}")
         
         return dummy_base
     
     def _setup_stack(self):
-        """Настроить стек"""
-        # Стек уже выделен в SimpleEmulator
-        # Просто устанавливаем указатели
+        """Setup stack"""
+        # Stack already allocated in SimpleEmulator
+        # Just set pointers
         stack_top = self.emu.STACK_BASE + self.emu.STACK_SIZE - 0x1000
         
         self.emu.uc.reg_write(UC_X86_REG_RSP, stack_top)
         self.emu.uc.reg_write(UC_X86_REG_RBP, stack_top)
         
-        print(f"\n[*] Стек: 0x{stack_top:x}")
+        print(f"\n[*] Stack: 0x{stack_top:x}")
 
 
 if __name__ == "__main__":

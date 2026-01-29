@@ -1,38 +1,44 @@
 /*
- * minimal_test.c — Минимальный тест для эмулятора
+ * minimal_test.c — Минимальный тест без CRT
  * 
- * Без зависимостей от WinAPI, только чистый код.
- * Компиляция: gcc -nostdlib -e main minimal_test.c -o minimal_test.exe
+ * Компиляция без CRT:
+ *   gcc -nostdlib -e mainCRTStartup minimal_test.c -o minimal_test.exe -lkernel32
  */
 
-// Простая функция для тестирования RDTSC
-unsigned long long test_rdtsc() {
-    unsigned long long result;
-    __asm__ volatile ("rdtsc" : "=A" (result));
-    return result;
+#include <windows.h>
+
+// Прототипы WinAPI функций
+__declspec(dllimport) ULONGLONG __stdcall GetTickCount64(void);
+__declspec(dllimport) void __stdcall ExitProcess(UINT uExitCode);
+
+// Inline RDTSC
+static inline unsigned long long rdtsc() {
+    unsigned int lo, hi;
+    __asm__ volatile ("rdtsc" : "=a" (lo), "=d" (hi));
+    return ((unsigned long long)hi << 32) | lo;
 }
 
-// Простая функция для тестирования времени
-int test_timing() {
-    unsigned long long t1 = test_rdtsc();
+// Entry point
+void mainCRTStartup() {
+    // Замеряем RDTSC
+    unsigned long long t1 = rdtsc();
     
-    // Критичный блок (простой цикл)
+    // Простой цикл
     volatile int sum = 0;
     for (int i = 0; i < 1000; i++) {
         sum += i;
     }
     
-    unsigned long long t2 = test_rdtsc();
+    // Замеряем снова
+    unsigned long long t2 = rdtsc();
     
-    // Проверка: прошло ли время?
-    if (t2 > t1) {
-        return 0;  // SUCCESS
+    // Вычисляем дельту
+    unsigned long long delta = t2 - t1;
+    
+    // Если дельта разумная (> 0 и < 1000000) — успех
+    if (delta > 0 && delta < 1000000) {
+        ExitProcess(0);  // SUCCESS
     } else {
-        return 1;  // FAIL
+        ExitProcess(1);  // FAIL
     }
-}
-
-// Entry point
-int main() {
-    return test_timing();
 }

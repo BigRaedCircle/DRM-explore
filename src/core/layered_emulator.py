@@ -35,6 +35,16 @@ class LayeredEmulator:
         self.instruction_count = 0
         self.syscall_count = 0
         
+        # Выделение памяти для стека
+        self.STACK_BASE = 0x00100000
+        self.STACK_SIZE = 0x00100000  # 1 МБ
+        self.uc.mem_map(self.STACK_BASE, self.STACK_SIZE)
+        self.uc.reg_write(UC_X86_REG_RSP, self.STACK_BASE + self.STACK_SIZE - 0x1000)
+        
+        # Выделение памяти для заглушек WinAPI (ПЕРЕД созданием WinAPIStubs!)
+        STUB_BASE = 0x7FFF0000
+        self.uc.mem_map(STUB_BASE, 0x10000)
+        
         # WinAPI заглушки
         self.winapi = WinAPIStubs(self)
         
@@ -43,15 +53,6 @@ class LayeredEmulator:
         
         # Настройка хуков
         self._setup_hooks()
-        
-        # Выделение памяти для стека
-        self.STACK_BASE = 0x00100000
-        self.STACK_SIZE = 0x00100000  # 1 МБ
-        self.uc.mem_map(self.STACK_BASE, self.STACK_SIZE)
-        self.uc.reg_write(UC_X86_REG_RSP, self.STACK_BASE + self.STACK_SIZE - 0x1000)
-        
-        # Выделение памяти для заглушек WinAPI
-        self.uc.mem_map(self.winapi.STUB_BASE, 0x10000)
     
     def _setup_hooks(self):
         """Настроить хуки для перехвата инструкций"""
@@ -59,11 +60,11 @@ class LayeredEmulator:
         self.uc.hook_add(UC_HOOK_CODE, self._hook_instruction)
     
     def _hook_instruction(self, uc, address, size, user_data):
-        """Хук на каждую инструкцию — продвигаем виртуальное время"""
+        """Hook on every instruction - advance virtual time"""
         self.clock.advance(1)
         self.instruction_count += 1
         
-        # Читаем инструкцию для проверки на RDTSC
+        # Read instruction to check for RDTSC
         try:
             code = uc.mem_read(address, min(size, 15))
             
@@ -74,21 +75,21 @@ class LayeredEmulator:
             pass
     
     def _handle_rdtsc(self, uc):
-        """Обработка RDTSC"""
+        """Handle RDTSC instruction"""
         ticks = self.clock.rdtsc()
         
-        # RDTSC возвращает значение в EDX:EAX
+        # RDTSC returns value in EDX:EAX
         eax = ticks & 0xFFFFFFFF
         edx = (ticks >> 32) & 0xFFFFFFFF
         
         uc.reg_write(UC_X86_REG_RAX, eax)
         uc.reg_write(UC_X86_REG_RDX, edx)
         
-        print(f"[RDTSC] @ 0x{uc.reg_read(UC_X86_REG_RIP):x} -> {ticks} тактов")
+        print(f"[RDTSC] @ 0x{uc.reg_read(UC_X86_REG_RIP):x} -> {ticks} ticks")
     
     def load_pe(self, pe_path):
-        """Загрузить PE-файл"""
-        print(f"\n[*] Загрузка PE: {pe_path}")
+        """Load PE file"""
+        print(f"\n[*] Loading PE: {pe_path}")
         
         self.pe_loader = PELoader(self)
         entry_point = self.pe_loader.load(pe_path)
@@ -99,40 +100,40 @@ class LayeredEmulator:
         return entry_point
     
     def load_code(self, code, base_addr=0x400000):
-        """Загрузить машинный код напрямую"""
-        # Выделяем память
-        code_size = ((len(code) + 0xFFF) // 0x1000) * 0x1000  # Выравнивание по 4KB
+        """Load machine code directly"""
+        # Allocate memory
+        code_size = ((len(code) + 0xFFF) // 0x1000) * 0x1000  # Align to 4KB
         self.uc.mem_map(base_addr, code_size)
         
-        # Записываем код
+        # Write code
         self.uc.mem_write(base_addr, code)
         
         return base_addr
     
     def run(self, start_addr, end_addr=0, max_instructions=100000):
-        """Запустить эмуляцию"""
-        print(f"\n[*] Запуск эмуляции с адреса 0x{start_addr:x}")
-        print(f"[*] Начальное состояние: {self.clock}")
+        """Run emulation"""
+        print(f"\n[*] Starting emulation from address 0x{start_addr:x}")
+        print(f"[*] Initial state: {self.clock}")
         print("-" * 70)
         
         try:
-            # Устанавливаем RIP
+            # Set RIP
             self.uc.reg_write(UC_X86_REG_RIP, start_addr)
             
-            # Запускаем эмуляцию
+            # Start emulation
             self.uc.emu_start(start_addr, end_addr, count=max_instructions)
             
         except UcError as e:
-            print(f"\n[!] Ошибка эмуляции: {e}")
+            print(f"\n[!] Emulation error: {e}")
             print(f"[!] RIP: 0x{self.uc.reg_read(UC_X86_REG_RIP):x}")
         
         print("-" * 70)
-        print(f"\n[*] Эмуляция завершена")
-        print(f"[*] Конечное состояние: {self.clock}")
-        print(f"[*] Инструкций выполнено: {self.instruction_count:,}")
-        print(f"[*] Системных вызовов: {self.syscall_count}")
+        print(f"\n[*] Emulation finished")
+        print(f"[*] Final state: {self.clock}")
+        print(f"[*] Instructions executed: {self.instruction_count:,}")
+        print(f"[*] System calls: {self.syscall_count}")
         
-        # Возвращаем RAX (код возврата)
+        # Return RAX (exit code)
         return self.uc.reg_read(UC_X86_REG_RAX)
 
 

@@ -53,6 +53,15 @@ class WinAPIStubs:
                 'address': addr,
                 'handler': handler
             }
+            
+            # Записываем простую заглушку: XOR RAX, RAX; RET
+            # Это временное решение - в будущем нужно будет вызывать handler
+            stub_code = bytes([
+                0x48, 0x31, 0xC0,  # XOR RAX, RAX
+                0xC3,              # RET
+            ])
+            self.uc.mem_write(addr, stub_code)
+            
             addr += 0x100  # 256 байт на функцию
     
     def _stub_get_tick_count(self):
