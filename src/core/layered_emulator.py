@@ -163,11 +163,12 @@ class LayeredEmulator:
         
         return base_addr
     
-    def run(self, start_addr, end_addr=0, max_instructions=100000):
+    def run(self, start_addr, end_addr=0, max_instructions=100000, verbose=True):
         """Run emulation"""
-        print(f"\n[*] Starting emulation from address 0x{start_addr:x}")
-        print(f"[*] Initial state: {self.clock}")
-        print("-" * 70)
+        if verbose:
+            print(f"\n[*] Starting emulation from address 0x{start_addr:x}")
+            print(f"[*] Initial state: {self.clock}")
+            print("-" * 70)
         
         try:
             # Set RIP
@@ -177,14 +178,16 @@ class LayeredEmulator:
             self.uc.emu_start(start_addr, end_addr, count=max_instructions)
             
         except UcError as e:
-            print(f"\n[!] Emulation error: {e}")
-            print(f"[!] RIP: 0x{self.uc.reg_read(UC_X86_REG_RIP):x}")
+            if verbose:
+                print(f"\n[!] Emulation error: {e}")
+                print(f"[!] RIP: 0x{self.uc.reg_read(UC_X86_REG_RIP):x}")
         
-        print("-" * 70)
-        print(f"\n[*] Emulation finished")
-        print(f"[*] Final state: {self.clock}")
-        print(f"[*] Instructions executed: {self.instruction_count:,}")
-        print(f"[*] System calls: {self.syscall_count}")
+        if verbose:
+            print("-" * 70)
+            print(f"\n[*] Emulation finished")
+            print(f"[*] Final state: {self.clock}")
+            print(f"[*] Instructions executed: {self.instruction_count:,}")
+            print(f"[*] System calls: {self.syscall_count}")
         
         # Return RAX (exit code)
         return self.uc.reg_read(UC_X86_REG_RAX)

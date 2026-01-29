@@ -51,6 +51,14 @@ class WinAPIStubs:
             ('GetCurrentThreadId', self._stub_get_current_thread_id),
             ('GetCurrentProcess', self._stub_get_current_process),
             
+            # === CRT SUPPORT ===
+            ('GetCommandLineA', self._stub_get_command_line_a),
+            ('GetCommandLineW', self._stub_get_command_line_w),
+            ('GetModuleHandleW', self._stub_get_module_handle_w),
+            ('GetStartupInfoW', self._stub_get_startup_info_w),
+            ('InitializeSListHead', self._stub_initialize_slist_head),
+            ('SetUnhandledExceptionFilter', self._stub_set_unhandled_exception_filter),
+            
             # === EXIT ===
             ('ExitProcess', self._stub_exit),
         ]
@@ -232,6 +240,69 @@ class WinAPIStubs:
         # Stop emulation
         self.uc.emu_stop()
         return exit_code
+    
+    # === CRT SUPPORT ===
+    
+    def _stub_get_command_line_a(self):
+        """GetCommandLineA() - return pointer to command line"""
+        # Allocate and write command line string
+        cmd_line = b"time_check_demo.exe INVALID-KEY\x00"
+        ptr = self.emu.os.HeapAlloc(self.emu.os.heap.process_heap, 0, len(cmd_line))
+        self.uc.mem_write(ptr, cmd_line)
+        self.uc.reg_write(UC_X86_REG_RAX, ptr)
+        print(f"  -> 0x{ptr:x}")
+        return ptr
+    
+    def _stub_get_command_line_w(self):
+        """GetCommandLineW() - return pointer to wide command line"""
+        # Allocate and write wide command line string
+        cmd_line = "time_check_demo.exe INVALID-KEY\x00".encode('utf-16le')
+        ptr = self.emu.os.HeapAlloc(self.emu.os.heap.process_heap, 0, len(cmd_line))
+        self.uc.mem_write(ptr, cmd_line)
+        self.uc.reg_write(UC_X86_REG_RAX, ptr)
+        print(f"  -> 0x{ptr:x}")
+        return ptr
+    
+    def _stub_get_module_handle_w(self):
+        """GetModuleHandleW() - return module handle"""
+        # RCX = module name (or NULL for exe)
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        if ptr == 0:
+            # Return image base as module handle
+            handle = self.emu.pe_loader.image_base if self.emu.pe_loader else 0x140000000
+        else:
+            # Return fake handle
+            handle = 0x140000000
+        self.uc.reg_write(UC_X86_REG_RAX, handle)
+        print(f"  -> 0x{handle:x}")
+        return handle
+    
+    def _stub_get_startup_info_w(self):
+        """GetStartupInfoW() - fill STARTUPINFOW structure"""
+        # RCX = pointer to STARTUPINFOW
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        # Zero out structure (simplified)
+        self.uc.mem_write(ptr, b'\x00' * 104)  # sizeof(STARTUPINFOW)
+        print(f"  -> filled structure at 0x{ptr:x}")
+        return 0
+    
+    def _stub_initialize_slist_head(self):
+        """InitializeSListHead() - initialize singly linked list"""
+        # RCX = pointer to SLIST_HEADER
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        # Zero out header
+        self.uc.mem_write(ptr, b'\x00' * 16)
+        print(f"  -> initialized at 0x{ptr:x}")
+        return 0
+    
+    def _stub_set_unhandled_exception_filter(self):
+        """SetUnhandledExceptionFilter() - set exception filter"""
+        # RCX = filter function pointer
+        filter_ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        # Return previous filter (NULL)
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        print(f"  -> 0x0 (previous filter)")
+        return 0
     
     def _stub_get_tick_count(self):
         """GetTickCount() — возвращает миллисекунды (32-бит)"""
