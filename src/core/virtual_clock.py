@@ -20,7 +20,7 @@ class VirtualClock:
         self.cpu_freq_hz = cpu_freq_mhz * 1_000_000
         
         # Для QueryPerformanceCounter (обычно 10 MHz)
-        self.qpc_freq = 10_000_000
+        self.qpc_frequency = 10_000_000  # Hz
     
     def advance(self, cycles=1):
         """Продвинуть виртуальное время на N тактов"""
@@ -49,14 +49,14 @@ class VirtualClock:
         """
         # Обычно QPC работает на частоте ~10 MHz
         # Масштабируем наши такты к этой частоте
-        return (self.ticks * self.qpc_freq) // self.cpu_freq_hz
+        return (self.ticks * self.qpc_frequency) // self.cpu_freq_hz
     
     def query_performance_frequency(self):
         """
         Эмуляция QueryPerformanceFrequency()
         Возвращает: частота счётчика QPC
         """
-        return self.qpc_freq
+        return self.qpc_frequency
     
     def get_system_time_as_file_time(self):
         """

@@ -26,10 +26,23 @@ class WinAPIStubs:
         """Создать заглушки для основных функций"""
         # Список функций для эмуляции
         functions = [
+            # === ИСТОЧНИКИ ВРЕМЕНИ (все через VirtualClock) ===
+            ('GetTickCount', self._stub_get_tick_count),
             ('GetTickCount64', self._stub_get_tick_count64),
             ('QueryPerformanceCounter', self._stub_query_performance_counter),
+            ('QueryPerformanceFrequency', self._stub_query_performance_frequency),
+            ('GetSystemTime', self._stub_get_system_time),
+            ('GetLocalTime', self._stub_get_local_time),
+            ('GetSystemTimeAsFileTime', self._stub_get_system_time_as_filetime),
+            ('timeGetTime', self._stub_time_get_time),
+            ('NtQuerySystemTime', self._stub_nt_query_system_time),
+            ('RtlQueryPerformanceCounter', self._stub_rtl_query_performance_counter),
+            
+            # === ВЫВОД ===
             ('printf', self._stub_printf),
             ('puts', self._stub_puts),
+            
+            # === ЗАВЕРШЕНИЕ ===
             ('exit', self._stub_exit),
             ('ExitProcess', self._stub_exit),
         ]
@@ -42,8 +55,15 @@ class WinAPIStubs:
             }
             addr += 0x100  # 256 байт на функцию
     
+    def _stub_get_tick_count(self):
+        """GetTickCount() — возвращает миллисекунды (32-бит)"""
+        tick_count = self.emu.clock.get_tick_count() & 0xFFFFFFFF
+        self.uc.reg_write(UC_X86_REG_RAX, tick_count)
+        print(f"[API] GetTickCount() -> {tick_count} мс")
+        return tick_count
+    
     def _stub_get_tick_count64(self):
-        """GetTickCount64() — возвращает миллисекунды"""
+        """GetTickCount64() — возвращает миллисекунды (64-бит)"""
         tick_count = self.emu.clock.get_tick_count()
         self.uc.reg_write(UC_X86_REG_RAX, tick_count)
         print(f"[API] GetTickCount64() -> {tick_count} мс")
@@ -61,6 +81,92 @@ class WinAPIStubs:
         
         print(f"[API] QueryPerformanceCounter() -> {qpc}")
         return 1
+    
+    def _stub_query_performance_frequency(self):
+        """QueryPerformanceFrequency() — частота счётчика"""
+        # RCX = указатель на LARGE_INTEGER
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        freq = self.emu.clock.qpc_frequency
+        
+        # Записываем частоту
+        self.uc.mem_write(ptr, freq.to_bytes(8, 'little'))
+        self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+        
+        print(f"[API] QueryPerformanceFrequency() -> {freq} Hz")
+        return 1
+    
+    def _stub_get_system_time(self):
+        """GetSystemTime() — системное время (UTC)"""
+        # RCX = указатель на SYSTEMTIME структуру
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        # Вычисляем время на основе VirtualClock
+        # Базовое время: 2026-01-30 12:00:00 + виртуальные миллисекунды
+        base_time_ms = 1738238400000  # 2026-01-30 12:00:00 UTC в миллисекундах
+        current_ms = base_time_ms + self.emu.clock.get_tick_count()
+        
+        # Упрощённая SYSTEMTIME структура (16 байт)
+        # wYear, wMonth, wDayOfWeek, wDay, wHour, wMinute, wSecond, wMilliseconds
+        systemtime = bytes([
+            0xEA, 0x07,  # wYear = 2026
+            0x01, 0x00,  # wMonth = 1 (январь)
+            0x04, 0x00,  # wDayOfWeek = 4 (четверг)
+            0x1E, 0x00,  # wDay = 30
+            0x0C, 0x00,  # wHour = 12
+            0x00, 0x00,  # wMinute = 0
+            0x00, 0x00,  # wSecond = 0
+            (current_ms & 0xFF), ((current_ms >> 8) & 0xFF),  # wMilliseconds
+        ])
+        
+        self.uc.mem_write(ptr, systemtime)
+        print(f"[API] GetSystemTime() -> 2026-01-30 12:00:00.{current_ms % 1000:03d}")
+        return 0
+    
+    def _stub_get_local_time(self):
+        """GetLocalTime() — локальное время"""
+        # Для простоты возвращаем то же что GetSystemTime
+        return self._stub_get_system_time()
+    
+    def _stub_get_system_time_as_filetime(self):
+        """GetSystemTimeAsFileTime() — время в формате FILETIME"""
+        # RCX = указатель на FILETIME (64-бит)
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        # FILETIME = 100-наносекундные интервалы с 1601-01-01
+        # Базовое время: 2026-01-30 12:00:00
+        base_filetime = 133838880000000000  # 2026-01-30 12:00:00 в FILETIME
+        current_filetime = base_filetime + (self.emu.clock.get_tick_count() * 10000)
+        
+        self.uc.mem_write(ptr, current_filetime.to_bytes(8, 'little'))
+        print(f"[API] GetSystemTimeAsFileTime() -> {current_filetime}")
+        return 0
+    
+    def _stub_time_get_time(self):
+        """timeGetTime() — мультимедийный таймер"""
+        tick_count = self.emu.clock.get_tick_count() & 0xFFFFFFFF
+        self.uc.reg_write(UC_X86_REG_RAX, tick_count)
+        print(f"[API] timeGetTime() -> {tick_count} мс")
+        return tick_count
+    
+    def _stub_nt_query_system_time(self):
+        """NtQuerySystemTime() — NT kernel time"""
+        # RCX = указатель на LARGE_INTEGER
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        # Возвращаем то же что GetSystemTimeAsFileTime
+        base_filetime = 133838880000000000
+        current_filetime = base_filetime + (self.emu.clock.get_tick_count() * 10000)
+        
+        self.uc.mem_write(ptr, current_filetime.to_bytes(8, 'little'))
+        self.uc.reg_write(UC_X86_REG_RAX, 0)  # STATUS_SUCCESS
+        
+        print(f"[API] NtQuerySystemTime() -> {current_filetime}")
+        return 0
+    
+    def _stub_rtl_query_performance_counter(self):
+        """RtlQueryPerformanceCounter() — kernel-mode QPC"""
+        # То же что QueryPerformanceCounter
+        return self._stub_query_performance_counter()
     
     def _stub_printf(self):
         """printf() — вывод строки"""
