@@ -50,14 +50,25 @@
 ```
 .
 ├── README.md                   # Этот файл
+├── PROJECT_STATUS.md           # Детальный статус проекта
 ├── QUICK_START.md              # Быстрый старт
 ├── TECHNICAL_BRIEFING.md       # Полное техническое описание
 ├── RoadMap.md                  # План развития
 │
+├── src/core/
+│   ├── virtual_clock.py        # ✅ Единый источник времени
+│   ├── simple_emulator.py      # ✅ Эмуляция CPU
+│   ├── differential_analyzer.py # ✅ Дифференциальный анализ
+│   ├── pe_loader.py            # Загрузка PE-файлов
+│   └── winapi_stubs.py         # Заглушки WinAPI
+│
+├── demos/
+│   ├── test_rdtsc.py           # ✅ Тест VirtualClock
+│   ├── test_differential.py    # ✅ Тест дифференциального анализа
+│   └── time_check_demo.c       # Учебный анти-тампер
+│
 ├── denuvo-detector.py          # Детальный анализ PE (v1.0)
 ├── denuvo-advanced.py          # Система оценки с эвристиками
-├── detect.py                   # Простой детектор (legacy)
-├── detect-fast.py              # Быстрый поиск (legacy)
 │
 └── Denuvo DRM Detection Methods.txt  # Полная переписка с Qwen
 ```
@@ -127,10 +138,21 @@ python denuvo-advanced.py game.exe
 - ✓ Анализ энтропии и импортов
 - ✓ Batch-режим и экспорт результатов
 - ✓ Система оценки (0-100 баллов)
+- ✅ **Этап 1: Минимальная расслоенная эмуляция** — VirtualClock + SimpleEmulator
+- ✅ **Этап 4: Дифференциальный анализатор** — автоматическая локализация проверок
 
-### В разработке
-- 🚧 Минимальная расслоенная эмуляция (Этап 1)
-- 🚧 Дифференциальный анализатор (Этап 4)
+### Proof of Concept — ДОКАЗАН! 🎉
+```bash
+# Тест 1: RDTSC работает через VirtualClock
+$ python demos/test_rdtsc.py
+[OK] SUCCESS! Время консистентно: 2027 виртуальных тактов
+
+# Тест 2: Дифференциальный анализ локализует проверки
+$ python demos/test_differential.py
+[OK] SUCCESS! Расхождение найдено на шаге 1, адрес 0x40000a
+```
+
+### В бэклоге
 - 📋 Модель кэша (Этап 2)
 - 📋 Тепловой шум (Этап 3)
 - 📋 Виртуальная ОС (Этап 5)
