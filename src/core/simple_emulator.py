@@ -7,9 +7,10 @@ SimpleEmulator — минимальная расслоенная эмуляци�
 единый источник времени, поэтому анти-тампер не может детектировать эмуляцию.
 """
 
-from unicorn import Uc, UC_ARCH_X86, UC_MODE_64, UC_HOOK_CODE, UC_HOOK_INSN
+from unicorn import Uc, UC_ARCH_X86, UC_MODE_64, UC_HOOK_CODE, UC_HOOK_INSN, UC_HOOK_INTR
 from unicorn.x86_const import *
 from virtual_clock import VirtualClock
+from winapi_stubs import WinAPIStubs
 import struct
 
 
@@ -23,12 +24,17 @@ class SimpleEmulator:
         # Виртуальные часы
         self.clock = VirtualClock(cpu_freq_mhz)
         
-        # Выделяем память (2 МБ для кода и данных)
+        # WinAPI заглушки
+        self.winapi = WinAPIStubs(self)
+        
+        # Выделяем память (расширенная для PE-файлов)
         self.CODE_BASE = 0x400000
         self.STACK_BASE = 0x7FFF0000
-        self.STACK_SIZE = 0x10000  # 64 KB стек
+        self.STACK_SIZE = 0x100000  # 1 MB стек
         
-        self.uc.mem_map(self.CODE_BASE, 2 * 1024 * 1024)
+        # Выделяем большой блок для кода (для PE-файлов)
+        self.uc.mem_map(0x140000000, 64 * 1024 * 1024)  # 64 MB для PE
+        self.uc.mem_map(self.CODE_BASE, 16 * 1024 * 1024)  # 16 MB для простого кода
         self.uc.mem_map(self.STACK_BASE, self.STACK_SIZE)
         
         # Инициализация стека
@@ -47,18 +53,28 @@ class SimpleEmulator:
         # Хук на каждую инструкцию (для подсчёта тактов)
         self.uc.hook_add(UC_HOOK_CODE, self._hook_code)
         
+        # Хук на прерывания (для перехвата вызовов API)
+        self.uc.hook_add(UC_HOOK_INTR, self._hook_interrupt)
+        
         # Хук на RDTSC
         try:
             self.uc.hook_add(UC_HOOK_INSN, self._hook_rdtsc, arg1=UC_X86_INS_RDTSC)
         except:
-            # Альтернативный способ для старых версий Unicorn
             pass
         
-        # Хук на SYSCALL (для перехвата системных вызовов)
+        # Хук на SYSCALL
         try:
             self.uc.hook_add(UC_HOOK_INSN, self._hook_syscall, arg1=UC_X86_INS_SYSCALL)
         except:
             pass
+    
+    def _hook_interrupt(self, uc, intno, user_data):
+        """Хук на прерывания (INT)"""
+        # INT 3 — breakpoint (игнорируем)
+        if intno == 3:
+            return
+        
+        print(f"[INT] Прерывание {intno}")
     
     def _hook_code(self, uc, address, size, user_data):
         """Хук на каждую инструкцию — продвигаем виртуальное время"""
@@ -145,7 +161,8 @@ class SimpleEmulator:
             print(f"[*] Системных вызовов: {self.syscalls_intercepted}")
             
         except Exception as e:
-            print(f"\n[!] Ошибка эмуляции: {e}")
+            rip = self.uc.reg_read(UC_X86_REG_RIP)
+            print(f"\n[!] Ошибка эмуляции на адресе 0x{rip:x}: {e}")
             raise
     
     def get_register(self, reg):

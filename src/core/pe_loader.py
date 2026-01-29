@@ -34,10 +34,13 @@ class PELoader:
         print(f"[*] EntryPoint: 0x{self.entry_point:x}")
         print(f"[*] Секций: {self.pe.FILE_HEADER.NumberOfSections}")
         
-        # Выделяем память под образ
+        # Выделяем память под образ (если ещё не выделена)
         image_size = self.pe.OPTIONAL_HEADER.SizeOfImage
-        self.emu.uc.mem_map(self.image_base, image_size)
-        print(f"[*] Выделено памяти: {image_size:,} байт")
+        try:
+            self.emu.uc.mem_map(self.image_base, image_size)
+            print(f"[*] Выделено памяти: {image_size:,} байт")
+        except:
+            print(f"[*] Память уже выделена (используем существующую)")
         
         # Загружаем секции
         self._load_sections()
