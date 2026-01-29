@@ -78,12 +78,33 @@ class SimpleEmulator:
     
     def _hook_code(self, uc, address, size, user_data):
         """Хук на каждую инструкцию — продвигаем виртуальное время"""
+        # Читаем инструкцию
+        try:
+            code = uc.mem_read(address, min(size, 2))
+            
+            # Проверяем на RDTSC (0x0F 0x31)
+            if len(code) >= 2 and code[0] == 0x0F and code[1] == 0x31:
+                # Эмулируем RDTSC
+                ticks = self.clock.rdtsc()
+                eax = ticks & 0xFFFFFFFF
+                edx = (ticks >> 32) & 0xFFFFFFFF
+                
+                uc.reg_write(UC_X86_REG_RAX, eax)
+                uc.reg_write(UC_X86_REG_RDX, edx)
+                
+                print(f"[RDTSC] @ 0x{address:x} -> {ticks} тактов")
+                
+                # Пропускаем инструкцию
+                uc.reg_write(UC_X86_REG_RIP, address + 2)
+                
+                # Латентность RDTSC
+                self.clock.advance(25)
+                return
+        except:
+            pass
+        
         # Примерная стоимость инструкции в тактах (упрощённо)
-        cycles = 1  # Большинство инструкций — 1 такт
-        
-        # Можно усложнить: разные инструкции — разная стоимость
-        # Например, MUL/DIV — 3-10 тактов, JMP — 1-2 такта
-        
+        cycles = 1
         self.clock.advance(cycles)
         self.instructions_executed += 1
     
