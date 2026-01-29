@@ -180,8 +180,8 @@ def demo_simple_code():
     rdx = emu.get_register(UC_X86_REG_RDX)
     result = (rdx << 32) | rax
     
-    print(f"\n[✓] Результат RDTSC: {result:,} тактов")
-    print(f"[✓] Соответствует VirtualClock: {emu.clock.rdtsc():,} тактов")
+    print(f"\n[OK] Результат RDTSC: {result:,} тактов")
+    print(f"[OK] Соответствует VirtualClock: {emu.clock.rdtsc():,} тактов")
 
 
 if __name__ == "__main__":
