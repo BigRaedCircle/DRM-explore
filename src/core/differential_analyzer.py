@@ -13,6 +13,12 @@ sys.path.insert(0, '.')
 from simple_emulator import SimpleEmulator
 from unicorn.x86_const import *
 
+try:
+    from capstone import Cs, CS_ARCH_X86, CS_MODE_64
+    CAPSTONE_AVAILABLE = True
+except ImportError:
+    CAPSTONE_AVAILABLE = False
+
 
 class DifferentialAnalyzer:
     """Дифференциальный анализатор для локализации проверок"""
@@ -34,6 +40,12 @@ class DifferentialAnalyzer:
         
         # Точка расхождения
         self.divergence_point = None
+        
+        # Дизассемблер (если доступен Capstone)
+        if CAPSTONE_AVAILABLE:
+            self.disasm = Cs(CS_ARCH_X86, CS_MODE_64)
+        else:
+            self.disasm = None
     
     def load_code(self, code_a, code_b, base_addr=0x400000):
         """Загрузить код в оба эмулятора"""
@@ -134,6 +146,28 @@ class DifferentialAnalyzer:
         print(f"\n[*] Шаг: {step}")
         print(f"[*] Адрес: 0x{state_a['rip']:x}")
         
+        # Дизассемблирование инструкции в точке расхождения
+        if self.disasm:
+            try:
+                code = self.emu_a.uc.mem_read(state_a['rip'], 15)
+                instructions = list(self.disasm.disasm(bytes(code), state_a['rip']))
+                if instructions:
+                    insn = instructions[0]
+                    print(f"[*] Инструкция: {insn.mnemonic} {insn.op_str}")
+                    
+                    # Контекст: 3 инструкции до и 3 после
+                    print(f"\n[КОНТЕКСТ] Инструкции вокруг точки расхождения:")
+                    context_addr = state_a['rip'] - 15  # Примерно 3 инструкции назад
+                    try:
+                        context_code = self.emu_a.uc.mem_read(context_addr, 45)
+                        for ctx_insn in self.disasm.disasm(bytes(context_code), context_addr):
+                            marker = " >>> " if ctx_insn.address == state_a['rip'] else "     "
+                            print(f"{marker}0x{ctx_insn.address:x}: {ctx_insn.mnemonic:8} {ctx_insn.op_str}")
+                    except:
+                        pass
+            except Exception as e:
+                print(f"[!] Не удалось дизассемблировать: {e}")
+        
         print(f"\n[ЭМУЛЯТОР A] Состояние:")
         self._print_state(state_a)
         
@@ -146,7 +180,7 @@ class DifferentialAnalyzer:
                 print(f"  {reg.upper()}: 0x{state_a[reg]:x} vs 0x{state_b[reg]:x}")
         
         # Контекст (предыдущие 3 шага)
-        print(f"\n[КОНТЕКСТ] Предыдущие 3 шага:")
+        print(f"\n[ИСТОРИЯ] Предыдущие 3 шага:")
         for i in range(max(0, step-3), step):
             print(f"  Шаг {i}: RIP=0x{self.trace_a[i]['rip']:x}, RAX=0x{self.trace_a[i]['rax']:x}")
     
