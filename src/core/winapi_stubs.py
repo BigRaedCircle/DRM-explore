@@ -135,67 +135,67 @@ class WinAPIStubs:
         print(f"  -> {current_filetime}")
         return 0
     
-    # === MEMORY MANAGEMENT (call REAL Windows API) ===
+    # === MEMORY MANAGEMENT (use MiniOS) ===
     
     def _stub_get_process_heap(self):
-        """GetProcessHeap() - call REAL Windows function"""
-        # Call real Windows API
-        heap_handle = kernel32.GetProcessHeap()
+        """GetProcessHeap() - use MiniOS"""
+        heap_handle = self.emu.os.GetProcessHeap()
         self.uc.reg_write(UC_X86_REG_RAX, heap_handle)
-        print(f"  -> 0x{heap_handle:x} (REAL)")
+        print(f"  -> 0x{heap_handle:x}")
         return heap_handle
     
     def _stub_heap_alloc(self):
-        """HeapAlloc() - call REAL Windows function"""
+        """HeapAlloc() - use MiniOS"""
         # RCX = heap handle, RDX = flags, R8 = size
         heap = self.uc.reg_read(UC_X86_REG_RCX)
         flags = self.uc.reg_read(UC_X86_REG_RDX)
         size = self.uc.reg_read(UC_X86_REG_R8)
         
-        # Call real Windows API
-        result = kernel32.HeapAlloc(heap, flags, size)
+        result = self.emu.os.HeapAlloc(heap, flags, size)
         self.uc.reg_write(UC_X86_REG_RAX, result)
-        print(f"  HeapAlloc(0x{heap:x}, 0x{flags:x}, {size}) -> 0x{result:x} (REAL)")
+        print(f"  HeapAlloc(0x{heap:x}, 0x{flags:x}, {size}) -> 0x{result:x}")
         return result
     
     def _stub_heap_free(self):
-        """HeapFree() - call REAL Windows function"""
+        """HeapFree() - use MiniOS"""
         # RCX = heap handle, RDX = flags, R8 = ptr
         heap = self.uc.reg_read(UC_X86_REG_RCX)
         flags = self.uc.reg_read(UC_X86_REG_RDX)
         ptr = self.uc.reg_read(UC_X86_REG_R8)
         
-        # Call real Windows API
-        result = kernel32.HeapFree(heap, flags, ptr)
+        result = self.emu.os.HeapFree(heap, flags, ptr)
         self.uc.reg_write(UC_X86_REG_RAX, result)
-        print(f"  HeapFree(0x{heap:x}, 0x{flags:x}, 0x{ptr:x}) -> {result} (REAL)")
+        print(f"  HeapFree(0x{heap:x}, 0x{flags:x}, 0x{ptr:x}) -> {result}")
         return result
     
     def _stub_heap_size(self):
-        """HeapSize() - call REAL Windows function"""
+        """HeapSize() - simplified"""
         # RCX = heap handle, RDX = flags, R8 = ptr
         heap = self.uc.reg_read(UC_X86_REG_RCX)
         flags = self.uc.reg_read(UC_X86_REG_RDX)
         ptr = self.uc.reg_read(UC_X86_REG_R8)
         
-        # Call real Windows API
-        result = kernel32.HeapSize(heap, flags, ptr)
+        # Return size from heap manager
+        if ptr in self.emu.os.heap.allocations:
+            result = self.emu.os.heap.allocations[ptr]
+        else:
+            result = 0
+        
         self.uc.reg_write(UC_X86_REG_RAX, result)
-        print(f"  HeapSize(0x{heap:x}, 0x{flags:x}, 0x{ptr:x}) -> {result} (REAL)")
+        print(f"  HeapSize(0x{heap:x}, 0x{flags:x}, 0x{ptr:x}) -> {result}")
         return result
     
     def _stub_heap_realloc(self):
-        """HeapReAlloc() - call REAL Windows function"""
+        """HeapReAlloc() - use MiniOS"""
         # RCX = heap handle, RDX = flags, R8 = ptr, R9 = new size
         heap = self.uc.reg_read(UC_X86_REG_RCX)
         flags = self.uc.reg_read(UC_X86_REG_RDX)
         ptr = self.uc.reg_read(UC_X86_REG_R8)
         new_size = self.uc.reg_read(UC_X86_REG_R9)
         
-        # Call real Windows API
-        result = kernel32.HeapReAlloc(heap, flags, ptr, new_size)
+        result = self.emu.os.HeapReAlloc(heap, flags, ptr, new_size)
         self.uc.reg_write(UC_X86_REG_RAX, result)
-        print(f"  HeapReAlloc(0x{heap:x}, 0x{flags:x}, 0x{ptr:x}, {new_size}) -> 0x{result:x} (REAL)")
+        print(f"  HeapReAlloc(0x{heap:x}, 0x{flags:x}, 0x{ptr:x}, {new_size}) -> 0x{result:x}")
         return result
     
     # === PROCESS/THREAD INFO (call REAL Windows API) ===

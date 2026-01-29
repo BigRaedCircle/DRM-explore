@@ -17,6 +17,7 @@ from unicorn import Uc, UC_ARCH_X86, UC_MODE_64, UcError
 from unicorn import UC_HOOK_CODE, UC_HOOK_INSN
 from unicorn.x86_const import *
 from virtual_clock import VirtualClock
+from mini_os import MiniOS
 from winapi_stubs import WinAPIStubs
 from pe_loader import PELoader
 
@@ -30,6 +31,9 @@ class LayeredEmulator:
         
         # Виртуальные часы
         self.clock = VirtualClock(cpu_freq_mhz)
+        
+        # Минимальный OS-слой
+        self.os = MiniOS(self.uc, self.clock)
         
         # Счётчики
         self.instruction_count = 0
@@ -45,7 +49,7 @@ class LayeredEmulator:
         STUB_BASE = 0x7FFF0000
         self.uc.mem_map(STUB_BASE, 0x10000)
         
-        # WinAPI заглушки
+        # WinAPI заглушки (теперь используют MiniOS)
         self.winapi = WinAPIStubs(self)
         
         # PE Loader
@@ -56,7 +60,7 @@ class LayeredEmulator:
     
     def _setup_hooks(self):
         """Setup hooks for instruction interception"""
-        # Hook on every instruction (for cycle counting and RDTSC interception)
+        # Hook on every instruction (for cycle counting and RDTSC)
         self.uc.hook_add(UC_HOOK_CODE, self._hook_instruction)
         
         # Hook for INT instructions (system calls)
@@ -74,7 +78,13 @@ class LayeredEmulator:
             
             # RDTSC = 0x0F 0x31
             if len(code) >= 2 and code[0] == 0x0F and code[1] == 0x31:
-                self._handle_rdtsc(uc)
+                # Handle RDTSC
+                ticks = self.clock.rdtsc()
+                eax = ticks & 0xFFFFFFFF
+                edx = (ticks >> 32) & 0xFFFFFFFF
+                uc.reg_write(UC_X86_REG_RAX, eax)
+                uc.reg_write(UC_X86_REG_RDX, edx)
+                print(f"[RDTSC] @ 0x{address:x} -> {ticks} ticks")
             
             # Check for indirect JMP/CALL through memory (0xFF opcode)
             elif len(code) >= 2 and code[0] == 0xFF:
@@ -88,19 +98,6 @@ class LayeredEmulator:
                         print(f"[WARN] Indirect {'CALL' if reg == 2 else 'JMP'} @ 0x{address:x} with RAX=0")
         except:
             pass
-    
-    def _handle_rdtsc(self, uc):
-        """Handle RDTSC instruction"""
-        ticks = self.clock.rdtsc()
-        
-        # RDTSC returns value in EDX:EAX
-        eax = ticks & 0xFFFFFFFF
-        edx = (ticks >> 32) & 0xFFFFFFFF
-        
-        uc.reg_write(UC_X86_REG_RAX, eax)
-        uc.reg_write(UC_X86_REG_RDX, edx)
-        
-        print(f"[RDTSC] @ 0x{uc.reg_read(UC_X86_REG_RIP):x} -> {ticks} ticks")
     
     def _hook_interrupt(self, uc, intno, user_data):
         """Handle INT instructions (system calls)"""
@@ -119,8 +116,14 @@ class LayeredEmulator:
                 uc.reg_write(UC_X86_REG_RIP, ret_addr)
                 print(f"  <- returning to 0x{ret_addr:x}")
             else:
-                # Real breakpoint - skip it
-                print(f"[INT 0x03] @ 0x{rip:x} - Breakpoint (skipped)")
+                # INT3 in user code - use as RDTSC marker
+                ticks = self.clock.rdtsc()
+                eax = ticks & 0xFFFFFFFF
+                edx = (ticks >> 32) & 0xFFFFFFFF
+                uc.reg_write(UC_X86_REG_RAX, eax)
+                uc.reg_write(UC_X86_REG_RDX, edx)
+                print(f"[RDTSC via INT3] @ 0x{rip:x} -> {ticks} ticks (EAX=0x{eax:x}, EDX=0x{edx:x})")
+                # Advance RIP past INT3 (1 byte)
                 uc.reg_write(UC_X86_REG_RIP, rip + 1)
         elif intno == 0x29:
             # INT 0x29 - Windows fast debug output
@@ -149,12 +152,14 @@ class LayeredEmulator:
     
     def load_code(self, code, base_addr=0x400000):
         """Load machine code directly"""
-        # Allocate memory
-        code_size = ((len(code) + 0xFFF) // 0x1000) * 0x1000  # Align to 4KB
+        # Allocate memory (at least 4KB, aligned)
+        code_size = max(((len(code) + 0xFFF) // 0x1000) * 0x1000, 0x1000)
         self.uc.mem_map(base_addr, code_size)
         
         # Write code
         self.uc.mem_write(base_addr, code)
+        
+        print(f"[*] Allocated {code_size} bytes at 0x{base_addr:x}")
         
         return base_addr
     
