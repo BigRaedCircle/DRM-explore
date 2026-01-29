@@ -55,22 +55,37 @@ class LayeredEmulator:
         self._setup_hooks()
     
     def _setup_hooks(self):
-        """Настроить хуки для перехвата инструкций"""
-        # Хук на каждую инструкцию (для подсчёта тактов и перехвата RDTSC)
+        """Setup hooks for instruction interception"""
+        # Hook on every instruction (for cycle counting and RDTSC interception)
         self.uc.hook_add(UC_HOOK_CODE, self._hook_instruction)
+        
+        # Hook for INT instructions (system calls)
+        from unicorn import UC_HOOK_INTR
+        self.uc.hook_add(UC_HOOK_INTR, self._hook_interrupt)
     
     def _hook_instruction(self, uc, address, size, user_data):
         """Hook on every instruction - advance virtual time"""
         self.clock.advance(1)
         self.instruction_count += 1
         
-        # Read instruction to check for RDTSC
+        # Read instruction to check for RDTSC and indirect CALL/JMP
         try:
             code = uc.mem_read(address, min(size, 15))
             
             # RDTSC = 0x0F 0x31
             if len(code) >= 2 and code[0] == 0x0F and code[1] == 0x31:
                 self._handle_rdtsc(uc)
+            
+            # Check for indirect JMP/CALL through memory (0xFF opcode)
+            elif len(code) >= 2 and code[0] == 0xFF:
+                modrm = code[1]
+                # Check if it's JMP [mem] (opcode /4) or CALL [mem] (opcode /2)
+                reg = (modrm >> 3) & 0x7
+                if reg == 4 or reg == 2:  # JMP or CALL
+                    # This might be IAT call - log it
+                    rax = uc.reg_read(UC_X86_REG_RAX)
+                    if rax == 0:
+                        print(f"[WARN] Indirect {'CALL' if reg == 2 else 'JMP'} @ 0x{address:x} with RAX=0")
         except:
             pass
     
@@ -86,6 +101,39 @@ class LayeredEmulator:
         uc.reg_write(UC_X86_REG_RDX, edx)
         
         print(f"[RDTSC] @ 0x{uc.reg_read(UC_X86_REG_RIP):x} -> {ticks} ticks")
+    
+    def _hook_interrupt(self, uc, intno, user_data):
+        """Handle INT instructions (system calls)"""
+        rip = uc.reg_read(UC_X86_REG_RIP)
+        
+        if intno == 0x03:
+            # INT 0x03 - Breakpoint / Our stub marker
+            # Check if this is our stub
+            if rip >= self.winapi.STUB_BASE and rip < self.winapi.STUB_BASE + 0x10000:
+                # This is our stub - call handler
+                self.winapi.handle_stub_call(rip)
+                # Emulate RET: pop return address from stack
+                rsp = uc.reg_read(UC_X86_REG_RSP)
+                ret_addr = int.from_bytes(uc.mem_read(rsp, 8), 'little')
+                uc.reg_write(UC_X86_REG_RSP, rsp + 8)
+                uc.reg_write(UC_X86_REG_RIP, ret_addr)
+                print(f"  <- returning to 0x{ret_addr:x}")
+            else:
+                # Real breakpoint - skip it
+                print(f"[INT 0x03] @ 0x{rip:x} - Breakpoint (skipped)")
+                uc.reg_write(UC_X86_REG_RIP, rip + 1)
+        elif intno == 0x29:
+            # INT 0x29 - Windows fast debug output
+            # Just skip it - advance RIP by 2 bytes (CD 29)
+            print(f"[INT 0x29] @ 0x{rip:x} - Windows debug output (skipped)")
+            uc.reg_write(UC_X86_REG_RIP, rip + 2)
+        elif intno == 0x2E:
+            # INT 0x2E - Windows system call (old method)
+            print(f"[INT 0x2E] @ 0x{rip:x} - Windows syscall (skipped)")
+            uc.reg_write(UC_X86_REG_RIP, rip + 2)
+        else:
+            print(f"[INT 0x{intno:02x}] @ 0x{rip:x} - Unknown interrupt")
+            # Let it crash for debugging
     
     def load_pe(self, pe_path):
         """Load PE file"""
