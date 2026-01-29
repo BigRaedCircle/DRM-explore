@@ -72,7 +72,19 @@ class LayeredEmulator:
         self.clock.advance(1)
         self.instruction_count += 1
         
-        # Read instruction to check for RDTSC and indirect CALL/JMP
+        # Check if we're executing in stub area - handle it immediately
+        if self.winapi.STUB_BASE <= address < self.winapi.STUB_BASE + 0x10000:
+            # We're in a stub - handle it
+            self.winapi.handle_stub_call(address)
+            # Pop return address and jump there
+            rsp = uc.reg_read(UC_X86_REG_RSP)
+            ret_addr = int.from_bytes(uc.mem_read(rsp, 8), 'little')
+            uc.reg_write(UC_X86_REG_RSP, rsp + 8)
+            uc.reg_write(UC_X86_REG_RIP, ret_addr)
+            print(f"  <- returning to 0x{ret_addr:x}")
+            return
+        
+        # Read instruction to check for RDTSC
         try:
             code = uc.mem_read(address, min(size, 15))
             

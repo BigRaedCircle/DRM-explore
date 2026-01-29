@@ -235,9 +235,12 @@ class WinAPIStubs:
         """ExitProcess() - stop emulation"""
         # RCX = exit code
         exit_code = self.uc.reg_read(UC_X86_REG_RCX)
-        print(f"  ExitProcess({exit_code})")
+        print(f"  ExitProcess({exit_code}) - stopping emulation")
         
-        # Stop emulation
+        # Set RAX to exit code
+        self.uc.reg_write(UC_X86_REG_RAX, exit_code)
+        
+        # Stop emulation immediately - don't return!
         self.uc.emu_stop()
         return exit_code
     

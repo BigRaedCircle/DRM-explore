@@ -70,44 +70,58 @@ def run_parallel_comparison(pe_path_a, pe_path_b, max_minutes=3):
         rax_a = emu_a.uc.reg_read(UC_X86_REG_RAX)
         rax_b = emu_b.uc.reg_read(UC_X86_REG_RAX)
         
+        # READ INSTRUCTION BYTES - this is the key!
+        # Compare what instruction is ABOUT TO BE EXECUTED
+        try:
+            instr_a = bytes(emu_a.uc.mem_read(rip_a, 15))  # Max x86-64 instruction length
+            instr_b = bytes(emu_b.uc.mem_read(rip_b, 15))
+        except:
+            instr_a = b''
+            instr_b = b''
+        
         # Save to trace
-        state_a = {'rip': rip_a, 'rax': rax_a}
-        state_b = {'rip': rip_b, 'rax': rax_b}
+        state_a = {'rip': rip_a, 'rax': rax_a, 'instr': instr_a}
+        state_b = {'rip': rip_b, 'rax': rax_b, 'instr': instr_b}
         trace_a.append(state_a)
         trace_b.append(state_b)
         
-        # Check divergence - compare RIP AND check if we're at a branch
+        # CRITICAL: Compare instruction bytes FIRST
+        # This catches divergence at the EXACT point where code differs
+        # (e.g., MOV AL, 'V' vs MOV AL, 'X')
+        if instr_a[:8] != instr_b[:8]:  # Compare first 8 bytes (enough for most instructions)
+            diverged = True
+            divergence_step = step
+            print(f"\n[!] INSTRUCTION DIVERGENCE at step {step:,} ({elapsed:.1f}s)")
+            print(f"    RIP: 0x{rip_a:x} (same address, different code!)")
+            print(f"    Instruction A: {instr_a[:8].hex()}")
+            print(f"    Instruction B: {instr_b[:8].hex()}")
+            break
+        
+        # Check RIP divergence (different execution paths)
         if rip_a != rip_b:
             diverged = True
             divergence_step = step
-            print(f"\n[!] DIVERGENCE at step {step:,} ({elapsed:.1f}s)")
+            print(f"\n[!] EXECUTION PATH DIVERGENCE at step {step:,} ({elapsed:.1f}s)")
             print(f"    RIP A: 0x{rip_a:x}")
             print(f"    RIP B: 0x{rip_b:x}")
             break
         
-        # Also check for conditional branch divergence
-        # Read instruction at current RIP
-        try:
-            code_a = bytes(emu_a.uc.mem_read(rip_a, 2))
-            # Check if it's a conditional jump (0x70-0x7F range)
-            if len(code_a) >= 1 and 0x70 <= code_a[0] <= 0x7F:
-                # This is a conditional jump - check flags
-                # Get EFLAGS
-                from unicorn.x86_const import UC_X86_REG_EFLAGS
-                flags_a = emu_a.uc.reg_read(UC_X86_REG_EFLAGS)
-                flags_b = emu_b.uc.reg_read(UC_X86_REG_EFLAGS)
-                
-                if flags_a != flags_b:
-                    diverged = True
-                    divergence_step = step
-                    print(f"\n[!] DIVERGENCE at conditional jump, step {step:,} ({elapsed:.1f}s)")
-                    print(f"    Address: 0x{rip_a:x}")
-                    print(f"    Instruction: 0x{code_a[0]:02x} (conditional jump)")
-                    print(f"    EFLAGS A: 0x{flags_a:x}")
-                    print(f"    EFLAGS B: 0x{flags_b:x}")
-                    break
-        except:
-            pass
+        # Check for conditional branch with different flags
+        if len(instr_a) >= 1 and 0x70 <= instr_a[0] <= 0x7F:
+            # This is a conditional jump - check flags
+            from unicorn.x86_const import UC_X86_REG_EFLAGS
+            flags_a = emu_a.uc.reg_read(UC_X86_REG_EFLAGS)
+            flags_b = emu_b.uc.reg_read(UC_X86_REG_EFLAGS)
+            
+            if flags_a != flags_b:
+                diverged = True
+                divergence_step = step
+                print(f"\n[!] CONDITIONAL BRANCH DIVERGENCE at step {step:,} ({elapsed:.1f}s)")
+                print(f"    Address: 0x{rip_a:x}")
+                print(f"    Instruction: 0x{instr_a[0]:02x} (conditional jump)")
+                print(f"    EFLAGS A: 0x{flags_a:x}")
+                print(f"    EFLAGS B: 0x{flags_b:x}")
+                break
         
         # Execute one instruction in each
         try:
@@ -121,7 +135,7 @@ def run_parallel_comparison(pe_path_a, pe_path_b, max_minutes=3):
         
         # Progress every 10k steps
         if step % 10000 == 0:
-            print(f"[*] Step {step:,} ({elapsed:.1f}s) - states identical")
+            print(f"[*] Step {step:,} ({elapsed:.1f}s) - states identical (RIP: 0x{rip_a:x})")
     
     print("-"*70)
     
@@ -148,23 +162,27 @@ def analyze_divergence(trace_a, trace_b, step, emu_a, emu_b):
     print(f"\nEMULATOR A:")
     print(f"  RIP: 0x{state_a['rip']:x}")
     print(f"  RAX: 0x{state_a['rax']:x}")
+    print(f"  Instruction: {state_a['instr'][:8].hex()}")
     
     print(f"\nEMULATOR B:")
     print(f"  RIP: 0x{state_b['rip']:x}")
     print(f"  RAX: 0x{state_b['rax']:x}")
+    print(f"  Instruction: {state_b['instr'][:8].hex()}")
     
     # Show context (previous 5 steps)
     print(f"\nCONTEXT (last 5 steps):")
-    print(f"{'Step':<8} {'RIP A':<18} {'RIP B':<18} {'Match':<8}")
-    print("-"*60)
+    print(f"{'Step':<8} {'RIP A':<18} {'Instr A':<20} {'RIP B':<18} {'Instr B':<20} {'Match':<8}")
+    print("-"*100)
     
     start = max(0, step - 5)
     for i in range(start, step + 1):
         rip_a = trace_a[i]['rip']
         rip_b = trace_b[i]['rip']
-        match = "OK" if rip_a == rip_b else "X DIFF"
+        instr_a = trace_a[i]['instr'][:4].hex()
+        instr_b = trace_b[i]['instr'][:4].hex()
+        match = "OK" if trace_a[i]['instr'][:8] == trace_b[i]['instr'][:8] else "X DIFF"
         marker = " <--" if i == step else ""
-        print(f"{i:<8} 0x{rip_a:<16x} 0x{rip_b:<16x} {match:<8}{marker}")
+        print(f"{i:<8} 0x{rip_a:<16x} {instr_a:<20} 0x{rip_b:<16x} {instr_b:<20} {match:<8}{marker}")
     
     # Calculate RVA
     if emu_a.pe_loader:
@@ -180,10 +198,24 @@ def analyze_divergence(trace_a, trace_b, step, emu_a, emu_b):
 
 
 def main():
-    pe_a = "demos/simple_valid.exe"
-    pe_b = "demos/simple_invalid.exe"
+    import sys
     
-    success = run_parallel_comparison(pe_a, pe_b, max_minutes=1)
+    if len(sys.argv) >= 3:
+        pe_a = sys.argv[1]
+        pe_b = sys.argv[2]
+        max_minutes = int(sys.argv[3]) if len(sys.argv) > 3 else 1
+    else:
+        # Default
+        pe_a = "demos/asm_valid.exe"
+        pe_b = "demos/asm_invalid.exe"
+        max_minutes = 1
+    
+    print(f"\nComparing:")
+    print(f"  A: {pe_a}")
+    print(f"  B: {pe_b}")
+    print(f"  Timeout: {max_minutes} min\n")
+    
+    success = run_parallel_comparison(pe_a, pe_b, max_minutes=max_minutes)
     
     print("\n" + "="*70)
     if success:
