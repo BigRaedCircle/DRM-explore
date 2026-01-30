@@ -53,6 +53,12 @@ class WinAPIStubs:
             ('HeapSize', self._stub_heap_size),
             ('HeapReAlloc', self._stub_heap_realloc),
             ('VirtualProtect', self._stub_virtual_protect),
+            ('GlobalAlloc', self._stub_global_alloc),
+            ('GlobalLock', self._stub_global_lock),
+            ('GlobalUnlock', self._stub_global_unlock),
+            ('GlobalFree', self._stub_global_free),
+            ('LocalAlloc', self._stub_local_alloc),
+            ('LocalFree', self._stub_local_free),
             
             # === PROCESS/THREAD INFO (call real Windows) ===
             ('GetCurrentProcessId', self._stub_get_current_process_id),
@@ -67,13 +73,20 @@ class WinAPIStubs:
             
             # === FILE I/O (заглушки) ===
             ('CreateFileA', self._stub_create_file_a),
-            ('CreateFileW', self._stub_create_file_a),  # Используем ту же заглушку
+            ('CreateFileW', self._stub_create_file_w),
             ('ReadFile', self._stub_read_file),
+            ('WriteFile', self._stub_write_file),
             ('CloseHandle', self._stub_close_handle),
             
             # === UI (заглушки) ===
             ('MessageBoxA', self._stub_message_box_a),
             ('MessageBoxW', self._stub_message_box_a),
+            ('EnumFontFamiliesW', self._stub_enum_font_families_w),
+            ('EnumFontFamiliesExW', self._stub_enum_font_families_ex_w),
+            ('CreateFontIndirectW', self._stub_create_font_indirect_w),
+            ('CreateFontW', self._stub_create_font_w),
+            ('GetDC', self._stub_get_dc),
+            ('ReleaseDC', self._stub_release_dc),
             
             # === SYSTEM INFO (заглушки) ===
             ('GetSystemInfo', self._stub_get_system_info),
@@ -98,6 +111,8 @@ class WinAPIStubs:
             # === ERROR HANDLING ===
             ('GetLastError', self._stub_get_last_error),
             ('SetLastError', self._stub_set_last_error),
+            ('RaiseException', self._stub_raise_exception),
+            ('RtlPcToFileHeader', self._stub_rtl_pc_to_file_header),
             
             # === POINTER ENCODING (security) ===
             ('EncodePointer', self._stub_encode_pointer),
@@ -108,6 +123,12 @@ class WinAPIStubs:
             ('FlsGetValue', self._stub_fls_get_value),
             ('FlsSetValue', self._stub_fls_set_value),
             ('FlsFree', self._stub_fls_free),
+            
+            # === THREAD LOCAL STORAGE ===
+            ('TlsAlloc', self._stub_tls_alloc),
+            ('TlsGetValue', self._stub_tls_get_value),
+            ('TlsSetValue', self._stub_tls_set_value),
+            ('TlsFree', self._stub_tls_free),
             
             # === STANDARD HANDLES ===
             ('GetStdHandle', self._stub_get_std_handle),
@@ -122,6 +143,16 @@ class WinAPIStubs:
             ('GetStartupInfoA', self._stub_get_startup_info_a),
             ('GetTickCount', self._stub_get_tick_count),
             
+            # === LOCALE AND CODE PAGES ===
+            ('IsValidCodePage', self._stub_is_valid_code_page),
+            ('GetCPInfo', self._stub_get_cp_info),
+            ('GetStringTypeW', self._stub_get_string_type_w),
+            ('MultiByteToWideChar', self._stub_multi_byte_to_wide_char),
+            ('WideCharToMultiByte', self._stub_wide_char_to_multi_byte),
+            ('LCMapStringW', self._stub_lc_map_string_w),
+            ('HeapCreate', self._stub_heap_create),
+            ('HeapSetInformation', self._stub_heap_set_information),
+            
             # === DIRECTX (реалистичные заглушки) ===
             ('D3D11CreateDevice', self._stub_d3d11_create_device),
             ('CreateSwapChain', self._stub_create_swap_chain),
@@ -132,6 +163,38 @@ class WinAPIStubs:
             ('connect', self._stub_connect),
             ('send', self._stub_send),
             ('recv', self._stub_recv),
+            ('socket', self._stub_socket),
+            ('closesocket', self._stub_closesocket),
+            ('WSAStartup', self._stub_wsa_startup),
+            ('WSACleanup', self._stub_wsa_cleanup),
+            ('WSAGetLastError', self._stub_wsa_get_last_error),
+            ('InternetOpenA', self._stub_internet_open_a),
+            ('InternetOpenW', self._stub_internet_open_w),
+            ('InternetOpenUrlA', self._stub_internet_open_url_a),
+            ('InternetOpenUrlW', self._stub_internet_open_url_w),
+            ('InternetReadFile', self._stub_internet_read_file),
+            ('InternetCloseHandle', self._stub_internet_close_handle),
+            ('HttpOpenRequestA', self._stub_http_open_request_a),
+            ('HttpOpenRequestW', self._stub_http_open_request_w),
+            ('HttpSendRequestA', self._stub_http_send_request_a),
+            ('HttpSendRequestW', self._stub_http_send_request_w),
+            ('InternetConnectA', self._stub_internet_connect_a),
+            ('InternetConnectW', self._stub_internet_connect_w),
+            
+            # === GUI MESSAGE LOOP ===
+            ('GetMessageA', self._stub_get_message_a),
+            ('GetMessageW', self._stub_get_message_w),
+            ('PeekMessageA', self._stub_peek_message_a),
+            ('PeekMessageW', self._stub_peek_message_w),
+            ('DispatchMessageA', self._stub_dispatch_message_a),
+            ('DispatchMessageW', self._stub_dispatch_message_w),
+            ('TranslateMessage', self._stub_translate_message),
+            ('PostQuitMessage', self._stub_post_quit_message),
+            ('DefWindowProcA', self._stub_def_window_proc_a),
+            ('DefWindowProcW', self._stub_def_window_proc_w),
+            ('WaitForSingleObject', self._stub_wait_for_single_object),
+            ('WaitForMultipleObjects', self._stub_wait_for_multiple_objects),
+            ('MsgWaitForMultipleObjects', self._stub_msg_wait_for_multiple_objects),
         ]
         
         addr = self.STUB_BASE
@@ -379,10 +442,11 @@ class WinAPIStubs:
         return 0
     
     def _stub_get_tick_count(self):
-        """GetTickCount() — возвращает миллисекунды (32-бит)"""
+        """GetTickCount() - returns milliseconds (32-bit)"""
         tick_count = self.emu.clock.get_tick_count() & 0xFFFFFFFF
         self.uc.reg_write(UC_X86_REG_RAX, tick_count)
-        print(f"[API] GetTickCount() -> {tick_count} мс")
+        print(f"  -> {tick_count} ms")
+        return tick_count
 
     def handle_unknown_function(self, func_name):
         """Мягкая обработка неизвестной функции"""
@@ -451,34 +515,211 @@ class WinAPIStubs:
             return self.handle_unknown_function("GetProcAddress")
     
     def _stub_create_file_a(self):
-        """CreateFileA() - открытие файла через VirtualFileSystem"""
-        # RCX = filename
+        """CreateFileA() - открытие/создание файла"""
+        # RCX = filename, RDX = desired access, R8 = share mode, R9 = security attributes
+        # Stack: creation disposition, flags, template file
         ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        desired_access = self.uc.reg_read(UC_X86_REG_RDX)
+        share_mode = self.uc.reg_read(UC_X86_REG_R8)
+        
+        # Read creation disposition from stack
+        rsp = self.uc.reg_read(UC_X86_REG_RSP)
+        try:
+            stack_params = self.uc.mem_read(rsp + 0x28, 8)
+            creation_disposition = struct.unpack('<Q', stack_params)[0]
+        except:
+            creation_disposition = 3  # OPEN_EXISTING
+        
         try:
             filename = self._read_string(ptr)
-            print(f"[API] CreateFileA('{filename}')")
             
-            # Используем VirtualFileSystem если доступна
-            if self.vfs:
-                handle = self.vfs.open(filename, 'rb')
-                if handle:
-                    self.uc.reg_write(UC_X86_REG_RAX, handle)
-                    file_size = self.vfs.get_size(handle)
-                    print(f"  -> 0x{handle:x} (VFS handle, size={file_size} bytes)")
-                    return handle
+            # Decode access flags
+            GENERIC_READ = 0x80000000
+            GENERIC_WRITE = 0x40000000
             
-            # Fallback: фейковый handle
-            fake_handle = 0x80000000 + hash(filename) % 0x10000000
-            self.uc.reg_write(UC_X86_REG_RAX, fake_handle)
-            print(f"  -> 0x{fake_handle:x} (fake file handle)")
-            return fake_handle
-        except:
+            # Decode creation disposition
+            # CREATE_NEW = 1, CREATE_ALWAYS = 2, OPEN_EXISTING = 3, OPEN_ALWAYS = 4, TRUNCATE_EXISTING = 5
+            
+            mode_str = ""
+            if desired_access & GENERIC_WRITE:
+                if creation_disposition == 2:  # CREATE_ALWAYS
+                    mode_str = "wb"
+                elif creation_disposition == 4:  # OPEN_ALWAYS
+                    mode_str = "ab"
+                else:
+                    mode_str = "wb"
+            elif desired_access & GENERIC_READ:
+                mode_str = "rb"
+            else:
+                mode_str = "rb"
+            
+            print(f"[API] CreateFileA('{filename}', access=0x{desired_access:x}, disposition={creation_disposition})")
+            print(f"  -> mode: {mode_str}")
+            
+            # Используем реальную файловую систему для записи
+            if not hasattr(self, '_file_handles'):
+                self._file_handles = {}
+                self._next_handle = 0x1000
+            
+            try:
+                # Открываем реальный файл
+                file_obj = open(filename, mode_str)
+                handle = self._next_handle
+                self._next_handle += 1
+                
+                self._file_handles[handle] = {
+                    'file': file_obj,
+                    'name': filename,
+                    'mode': mode_str
+                }
+                
+                self.uc.reg_write(UC_X86_REG_RAX, handle)
+                print(f"  -> 0x{handle:x} (REAL file handle)")
+                return handle
+            except Exception as e:
+                print(f"  -> INVALID_HANDLE_VALUE (error: {e})")
+                # INVALID_HANDLE_VALUE = -1
+                self.uc.reg_write(UC_X86_REG_RAX, 0xFFFFFFFFFFFFFFFF)
+                return 0xFFFFFFFFFFFFFFFF
+        except Exception as e:
+            print(f"[API] CreateFileA() - error: {e}")
             # INVALID_HANDLE_VALUE = -1
             self.uc.reg_write(UC_X86_REG_RAX, 0xFFFFFFFFFFFFFFFF)
             return 0xFFFFFFFFFFFFFFFF
     
+    def _stub_create_file_w(self):
+        """CreateFileW() - открытие/создание файла (Unicode)"""
+        # RCX = filename, RDX = desired access, R8 = share mode, R9 = security attributes
+        # Stack: creation disposition, flags, template file
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        desired_access = self.uc.reg_read(UC_X86_REG_RDX)
+        share_mode = self.uc.reg_read(UC_X86_REG_R8)
+        
+        # Read creation disposition from stack
+        rsp = self.uc.reg_read(UC_X86_REG_RSP)
+        try:
+            stack_params = self.uc.mem_read(rsp + 0x28, 8)
+            creation_disposition = struct.unpack('<Q', stack_params)[0]
+        except:
+            creation_disposition = 3  # OPEN_EXISTING
+        
+        try:
+            # Read wide string
+            filename_w = b''
+            for i in range(260):  # MAX_PATH
+                char = self.uc.mem_read(ptr + i*2, 2)
+                if char == b'\x00\x00':
+                    break
+                filename_w += char
+            filename = filename_w.decode('utf-16le', errors='ignore')
+            
+            # Decode access flags
+            GENERIC_READ = 0x80000000
+            GENERIC_WRITE = 0x40000000
+            
+            mode_str = ""
+            if desired_access & GENERIC_WRITE:
+                if creation_disposition == 2:  # CREATE_ALWAYS
+                    mode_str = "wb"
+                elif creation_disposition == 4:  # OPEN_ALWAYS
+                    mode_str = "ab"
+                else:
+                    mode_str = "wb"
+            elif desired_access & GENERIC_READ:
+                mode_str = "rb"
+            else:
+                mode_str = "rb"
+            
+            print(f"[API] CreateFileW('{filename}', access=0x{desired_access:x}, disposition={creation_disposition})")
+            print(f"  -> mode: {mode_str}")
+            
+            # Используем реальную файловую систему для записи
+            if not hasattr(self, '_file_handles'):
+                self._file_handles = {}
+                self._next_handle = 0x1000
+            
+            try:
+                # Открываем реальный файл
+                file_obj = open(filename, mode_str)
+                handle = self._next_handle
+                self._next_handle += 1
+                
+                self._file_handles[handle] = {
+                    'file': file_obj,
+                    'name': filename,
+                    'mode': mode_str
+                }
+                
+                self.uc.reg_write(UC_X86_REG_RAX, handle)
+                print(f"  -> 0x{handle:x} (REAL file handle)")
+                return handle
+            except Exception as e:
+                print(f"  -> INVALID_HANDLE_VALUE (error: {e})")
+                # INVALID_HANDLE_VALUE = -1
+                self.uc.reg_write(UC_X86_REG_RAX, 0xFFFFFFFFFFFFFFFF)
+                return 0xFFFFFFFFFFFFFFFF
+        except Exception as e:
+            print(f"[API] CreateFileW() - error: {e}")
+            # INVALID_HANDLE_VALUE = -1
+            self.uc.reg_write(UC_X86_REG_RAX, 0xFFFFFFFFFFFFFFFF)
+            return 0xFFFFFFFFFFFFFFFF
+    
+    def _stub_write_file(self):
+        """WriteFile() - запись в файл"""
+        # RCX = handle, RDX = buffer, R8 = bytes to write, R9 = bytes written ptr
+        # Stack: overlapped
+        handle = self.uc.reg_read(UC_X86_REG_RCX)
+        buffer = self.uc.reg_read(UC_X86_REG_RDX)
+        size = self.uc.reg_read(UC_X86_REG_R8)
+        bytes_written_ptr = self.uc.reg_read(UC_X86_REG_R9)
+        
+        print(f"[API] WriteFile(0x{handle:x}, 0x{buffer:x}, {size})")
+        
+        # Проверяем, есть ли у нас реальный файл
+        if hasattr(self, '_file_handles') and handle in self._file_handles:
+            try:
+                # Читаем данные из буфера эмулятора
+                data = self.uc.mem_read(buffer, size)
+                
+                # Записываем в реальный файл
+                file_obj = self._file_handles[handle]['file']
+                file_obj.write(data)
+                file_obj.flush()  # Сразу сбрасываем на диск
+                
+                # Записываем количество записанных байт
+                if bytes_written_ptr:
+                    self.uc.mem_write(bytes_written_ptr, size.to_bytes(4, 'little'))
+                
+                self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+                print(f"  -> TRUE (wrote {size} bytes to '{self._file_handles[handle]['name']}')")
+                return 1
+            except Exception as e:
+                print(f"  -> FALSE (error: {e})")
+                self.uc.reg_write(UC_X86_REG_RAX, 0)  # FALSE
+                return 0
+        
+        # Handle stdout (handle 7 = STD_OUTPUT_HANDLE)
+        if handle == 7 or handle == 0xfffffff5:  # STD_OUTPUT_HANDLE = -11 = 0xfffffff5
+            try:
+                data = self.uc.mem_read(buffer, size)
+                text = data.decode('utf-8', errors='ignore')
+                print(f"[STDOUT] {text}", end='')
+            except:
+                pass
+        
+        # Fallback: имитация записи
+        print(f"  -> TRUE (fake write, handle not found)")
+        if bytes_written_ptr:
+            try:
+                self.uc.mem_write(bytes_written_ptr, size.to_bytes(4, 'little'))
+            except:
+                pass
+        
+        self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+        return 1
+    
     def _stub_read_file(self):
-        """ReadFile() - чтение файла через VirtualFileSystem"""
+        """ReadFile() - чтение файла"""
         # RCX = handle, RDX = buffer, R8 = bytes to read, R9 = bytes read
         handle = self.uc.reg_read(UC_X86_REG_RCX)
         buffer = self.uc.reg_read(UC_X86_REG_RDX)
@@ -486,6 +727,28 @@ class WinAPIStubs:
         bytes_read_ptr = self.uc.reg_read(UC_X86_REG_R9)
         
         print(f"[API] ReadFile(0x{handle:x}, 0x{buffer:x}, {size})")
+        
+        # Проверяем, есть ли у нас реальный файл
+        if hasattr(self, '_file_handles') and handle in self._file_handles:
+            try:
+                # Читаем из реального файла
+                file_obj = self._file_handles[handle]['file']
+                data = file_obj.read(size)
+                
+                # Записываем в буфер эмулятора
+                self.uc.mem_write(buffer, data)
+                
+                # Записываем количество прочитанных байт
+                if bytes_read_ptr:
+                    self.uc.mem_write(bytes_read_ptr, len(data).to_bytes(4, 'little'))
+                
+                self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+                print(f"  -> TRUE (read {len(data)} bytes from '{self._file_handles[handle]['name']}')")
+                return 1
+            except Exception as e:
+                print(f"  -> FALSE (error: {e})")
+                self.uc.reg_write(UC_X86_REG_RAX, 0)  # FALSE
+                return 0
         
         # Используем VirtualFileSystem если доступна
         if self.vfs:
@@ -516,9 +779,25 @@ class WinAPIStubs:
         return 1
     
     def _stub_close_handle(self):
-        """CloseHandle() - закрытие handle через VirtualFileSystem"""
+        """CloseHandle() - закрытие handle"""
         handle = self.uc.reg_read(UC_X86_REG_RCX)
         print(f"[API] CloseHandle(0x{handle:x})")
+        
+        # Проверяем, есть ли у нас реальный файл
+        if hasattr(self, '_file_handles') and handle in self._file_handles:
+            try:
+                file_obj = self._file_handles[handle]['file']
+                file_name = self._file_handles[handle]['name']
+                file_obj.close()
+                del self._file_handles[handle]
+                
+                self.uc.reg_write(UC_X86_REG_RAX, 1)
+                print(f"  -> TRUE (closed REAL file '{file_name}')")
+                return 1
+            except Exception as e:
+                print(f"  -> FALSE (error: {e})")
+                self.uc.reg_write(UC_X86_REG_RAX, 0)
+                return 0
         
         # Используем VirtualFileSystem если доступна
         if self.vfs and self.vfs.close(handle):
@@ -547,6 +826,98 @@ class WinAPIStubs:
         # Возвращаем IDOK (1)
         self.uc.reg_write(UC_X86_REG_RAX, 1)
         print(f"  -> IDOK (suppressed)")
+        return 1
+    
+    def _stub_enum_font_families_w(self):
+        """EnumFontFamiliesW() - перечисление шрифтов"""
+        # RCX = hdc, RDX = family name, R8 = callback, R9 = lParam
+        hdc = self.uc.reg_read(UC_X86_REG_RCX)
+        callback = self.uc.reg_read(UC_X86_REG_R8)
+        
+        print(f"[API] EnumFontFamiliesW(hdc=0x{hdc:x}, callback=0x{callback:x})")
+        
+        # Возвращаем 0 - нет шрифтов (или ошибка)
+        # В режиме командной строки шрифты не нужны
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        print(f"  -> 0 (no fonts, command-line mode)")
+        return 0
+    
+    def _stub_enum_font_families_ex_w(self):
+        """EnumFontFamiliesExW() - расширенное перечисление шрифтов"""
+        # RCX = hdc, RDX = LOGFONT, R8 = callback, R9 = lParam
+        hdc = self.uc.reg_read(UC_X86_REG_RCX)
+        callback = self.uc.reg_read(UC_X86_REG_R8)
+        
+        print(f"[API] EnumFontFamiliesExW(hdc=0x{hdc:x}, callback=0x{callback:x})")
+        
+        # Возвращаем 0 - нет шрифтов (или ошибка)
+        # В режиме командной строки шрифты не нужны
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        print(f"  -> 0 (no fonts, command-line mode)")
+        return 0
+    
+    def _stub_create_font_indirect_w(self):
+        """CreateFontIndirectW() - создание шрифта"""
+        # RCX = LOGFONT pointer
+        logfont_ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        print(f"[API] CreateFontIndirectW(logfont=0x{logfont_ptr:x})")
+        
+        # Возвращаем фейковый handle (не NULL!)
+        # Это позволит CPU-Z продолжить, даже если он не использует шрифт
+        fake_handle = 0x50000001  # Фейковый HFONT
+        self.uc.reg_write(UC_X86_REG_RAX, fake_handle)
+        print(f"  -> 0x{fake_handle:x} (fake font handle)")
+        return fake_handle
+    
+    def _stub_create_font_w(self):
+        """CreateFontW() - создание шрифта"""
+        print(f"[API] CreateFontW()")
+        
+        # Возвращаем фейковый handle (не NULL!)
+        fake_handle = 0x50000002  # Фейковый HFONT
+        self.uc.reg_write(UC_X86_REG_RAX, fake_handle)
+        print(f"  -> 0x{fake_handle:x} (fake font handle)")
+        return fake_handle
+    
+    def _stub_get_dc(self):
+        """GetDC() - получение device context"""
+        # RCX = hwnd
+        hwnd = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        print(f"[API] GetDC(hwnd=0x{hwnd:x})")
+        
+        # Выделяем память для фейкового DC и заполняем нулями
+        if not hasattr(self, '_fake_dc_counter'):
+            self._fake_dc_counter = 0
+            self._fake_dc_base = 0x60000000
+            # Выделяем 1MB для фейковых DC
+            try:
+                self.uc.mem_map(self._fake_dc_base, 0x100000)
+                self.uc.mem_write(self._fake_dc_base, b'\x00' * 0x100000)
+                print(f"[DC] Allocated fake DC region at 0x{self._fake_dc_base:x}")
+            except:
+                pass
+        
+        # Возвращаем адрес в выделенной области
+        fake_dc = self._fake_dc_base + (self._fake_dc_counter * 0x1000)
+        self._fake_dc_counter += 1
+        
+        self.uc.reg_write(UC_X86_REG_RAX, fake_dc)
+        print(f"  -> 0x{fake_dc:x} (fake DC with allocated memory)")
+        return fake_dc
+    
+    def _stub_release_dc(self):
+        """ReleaseDC() - освобождение device context"""
+        # RCX = hwnd, RDX = hdc
+        hwnd = self.uc.reg_read(UC_X86_REG_RCX)
+        hdc = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        print(f"[API] ReleaseDC(hwnd=0x{hwnd:x}, hdc=0x{hdc:x})")
+        
+        # Возвращаем 1 - успех
+        self.uc.reg_write(UC_X86_REG_RAX, 1)
+        print(f"  -> 1 (success)")
         return 1
     
     def _stub_sleep(self):
@@ -628,6 +999,68 @@ class WinAPIStubs:
         print(f"  -> TRUE")
         return 1
     
+    def _stub_global_alloc(self):
+        """GlobalAlloc() - allocate global memory"""
+        # RCX = flags, RDX = size
+        flags = self.uc.reg_read(UC_X86_REG_RCX)
+        size = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        # Use heap allocator
+        result = self.emu.os.HeapAlloc(self.emu.os.heap.process_heap, flags, size)
+        self.uc.reg_write(UC_X86_REG_RAX, result)
+        print(f"  GlobalAlloc(0x{flags:x}, {size}) -> 0x{result:x}")
+        return result
+    
+    def _stub_global_lock(self):
+        """GlobalLock() - lock global memory (just return the handle)"""
+        # RCX = handle
+        handle = self.uc.reg_read(UC_X86_REG_RCX)
+        # In modern Windows, GlobalLock just returns the pointer
+        self.uc.reg_write(UC_X86_REG_RAX, handle)
+        print(f"  GlobalLock(0x{handle:x}) -> 0x{handle:x}")
+        return handle
+    
+    def _stub_global_unlock(self):
+        """GlobalUnlock() - unlock global memory"""
+        # RCX = handle
+        handle = self.uc.reg_read(UC_X86_REG_RCX)
+        # Always return TRUE
+        self.uc.reg_write(UC_X86_REG_RAX, 1)
+        print(f"  GlobalUnlock(0x{handle:x}) -> TRUE")
+        return 1
+    
+    def _stub_global_free(self):
+        """GlobalFree() - free global memory"""
+        # RCX = handle
+        handle = self.uc.reg_read(UC_X86_REG_RCX)
+        # Use heap free
+        result = self.emu.os.HeapFree(self.emu.os.heap.process_heap, 0, handle)
+        self.uc.reg_write(UC_X86_REG_RAX, 0 if result else handle)
+        print(f"  GlobalFree(0x{handle:x}) -> {0 if result else handle}")
+        return 0 if result else handle
+    
+    def _stub_local_alloc(self):
+        """LocalAlloc() - allocate local memory"""
+        # RCX = flags, RDX = size
+        flags = self.uc.reg_read(UC_X86_REG_RCX)
+        size = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        # Use heap allocator
+        result = self.emu.os.HeapAlloc(self.emu.os.heap.process_heap, flags, size)
+        self.uc.reg_write(UC_X86_REG_RAX, result)
+        print(f"  LocalAlloc(0x{flags:x}, {size}) -> 0x{result:x}")
+        return result
+    
+    def _stub_local_free(self):
+        """LocalFree() - free local memory"""
+        # RCX = handle
+        handle = self.uc.reg_read(UC_X86_REG_RCX)
+        # Use heap free
+        result = self.emu.os.HeapFree(self.emu.os.heap.process_heap, 0, handle)
+        self.uc.reg_write(UC_X86_REG_RAX, 0 if result else handle)
+        print(f"  LocalFree(0x{handle:x}) -> {0 if result else handle}")
+        return 0 if result else handle
+    
     # === CRITICAL SECTIONS (threading) ===
     
     def _stub_init_critical_section(self):
@@ -678,6 +1111,43 @@ class WinAPIStubs:
         error = self.uc.reg_read(UC_X86_REG_RCX)
         self.emu.os.last_error = error
         return 0
+    
+    def _stub_raise_exception(self):
+        """RaiseException() - raise an exception (stop emulation)"""
+        # RCX = exception code, RDX = exception flags, R8 = number of arguments, R9 = arguments
+        exception_code = self.uc.reg_read(UC_X86_REG_RCX)
+        exception_flags = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        print(f"[API] RaiseException(code=0x{exception_code:x}, flags=0x{exception_flags:x})")
+        
+        # Check if it's a C++ exception (0xE06D7363 = Microsoft C++ Exception)
+        if exception_code == 0xE06D7363:
+            print(f"  -> C++ exception detected - stopping emulation")
+            print(f"  -> This means CPU-Z encountered an error during initialization")
+        else:
+            print(f"  -> Exception code: 0x{exception_code:x}")
+        
+        # Stop emulation - don't return!
+        self.uc.emu_stop()
+        return 0
+    
+    def _stub_rtl_pc_to_file_header(self):
+        """RtlPcToFileHeader() - get module base from PC"""
+        # RCX = PC address, RDX = pointer to receive base address
+        pc = self.uc.reg_read(UC_X86_REG_RCX)
+        base_ptr = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        # Return image base
+        image_base = self.emu.pe_loader.image_base if self.emu.pe_loader else 0x140000000
+        
+        try:
+            self.uc.mem_write(base_ptr, image_base.to_bytes(8, 'little'))
+        except:
+            pass
+        
+        # Return image base in RAX
+        self.uc.reg_write(UC_X86_REG_RAX, image_base)
+        return image_base
     
     # === POINTER ENCODING (security) ===
     
@@ -750,6 +1220,61 @@ class WinAPIStubs:
             del self._fls_data[index]
         
         self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+        return 1
+    
+    # === THREAD LOCAL STORAGE ===
+    
+    def _stub_tls_alloc(self):
+        """TlsAlloc() - allocate thread local storage index"""
+        if not hasattr(self, '_tls_counter'):
+            self._tls_counter = 1
+            self._tls_data = {}
+        
+        index = self._tls_counter
+        self._tls_counter += 1
+        self._tls_data[index] = 0
+        
+        self.uc.reg_write(UC_X86_REG_RAX, index)
+        print(f"  TlsAlloc() -> {index}")
+        return index
+    
+    def _stub_tls_get_value(self):
+        """TlsGetValue() - get thread local storage value"""
+        # RCX = TLS index
+        index = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        if not hasattr(self, '_tls_data'):
+            self._tls_data = {}
+        
+        value = self._tls_data.get(index, 0)
+        self.uc.reg_write(UC_X86_REG_RAX, value)
+        print(f"  TlsGetValue({index}) -> 0x{value:x}")
+        return value
+    
+    def _stub_tls_set_value(self):
+        """TlsSetValue() - set thread local storage value"""
+        # RCX = TLS index, RDX = value
+        index = self.uc.reg_read(UC_X86_REG_RCX)
+        value = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        if not hasattr(self, '_tls_data'):
+            self._tls_data = {}
+        
+        self._tls_data[index] = value
+        self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+        print(f"  TlsSetValue({index}, 0x{value:x}) -> TRUE")
+        return 1
+    
+    def _stub_tls_free(self):
+        """TlsFree() - free thread local storage index"""
+        # RCX = TLS index
+        index = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        if hasattr(self, '_tls_data') and index in self._tls_data:
+            del self._tls_data[index]
+        
+        self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+        print(f"  TlsFree({index}) -> TRUE")
         return 1
     
     # === STANDARD HANDLES ===
@@ -843,11 +1368,226 @@ class WinAPIStubs:
             pass
         return 0
     
-    def _stub_get_tick_count(self):
-        """GetTickCount() - returns milliseconds (32-bit)"""
-        tick_count = self.emu.clock.get_tick_count() & 0xFFFFFFFF
-        self.uc.reg_write(UC_X86_REG_RAX, tick_count)
-        return tick_count
+    # === LOCALE AND CODE PAGES ===
+    
+    def _stub_is_valid_code_page(self):
+        """IsValidCodePage() - check if code page is valid"""
+        # RCX = code page
+        code_page = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        # Accept common code pages
+        valid_pages = [1252, 1251, 1250, 65001, 437, 850, 1200, 1201]
+        is_valid = 1 if code_page in valid_pages else 0
+        
+        self.uc.reg_write(UC_X86_REG_RAX, is_valid)
+        return is_valid
+    
+    def _stub_get_cp_info(self):
+        """GetCPInfo() - get code page information"""
+        # RCX = code page, RDX = pointer to CPINFO structure
+        code_page = self.uc.reg_read(UC_X86_REG_RCX)
+        ptr = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        # Fill CPINFO structure (simplified)
+        # typedef struct _cpinfo {
+        #   UINT MaxCharSize;        // 4 bytes
+        #   BYTE DefaultChar[2];     // 2 bytes
+        #   BYTE LeadByte[12];       // 12 bytes
+        # } CPINFO;
+        
+        max_char_size = 1  # Single-byte for most code pages
+        if code_page == 65001:  # UTF-8
+            max_char_size = 4
+        
+        cpinfo = struct.pack('<I2s12s', 
+            max_char_size,
+            b'?_',  # Default char
+            b'\x00' * 12  # No lead bytes for single-byte encodings
+        )
+        
+        try:
+            self.uc.mem_write(ptr, cpinfo)
+        except:
+            pass
+        
+        self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+        return 1
+    
+    def _stub_get_string_type_w(self):
+        """GetStringTypeW() - get character type information"""
+        # RCX = info type, RDX = string, R8 = count, R9 = char type buffer
+        info_type = self.uc.reg_read(UC_X86_REG_RCX)
+        string_ptr = self.uc.reg_read(UC_X86_REG_RDX)
+        count = self.uc.reg_read(UC_X86_REG_R8)
+        buffer_ptr = self.uc.reg_read(UC_X86_REG_R9)
+        
+        # Fill buffer with generic character types (all printable)
+        # CT_CTYPE1: 0x0001 = C1_UPPER, 0x0002 = C1_LOWER, 0x0008 = C1_SPACE, etc.
+        try:
+            # Just mark all as printable (0x0040 = C1_PRINT)
+            char_types = struct.pack('<' + 'H' * count, *([0x0040] * count))
+            self.uc.mem_write(buffer_ptr, char_types)
+        except:
+            pass
+        
+        self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+        return 1
+    
+    def _stub_multi_byte_to_wide_char(self):
+        """MultiByteToWideChar() - convert multibyte to wide char"""
+        # RCX = code page, RDX = flags, R8 = multibyte string, R9 = byte count
+        # Stack: wide char buffer, wide char count
+        code_page = self.uc.reg_read(UC_X86_REG_RCX)
+        flags = self.uc.reg_read(UC_X86_REG_RDX)
+        mb_str_ptr = self.uc.reg_read(UC_X86_REG_R8)
+        mb_count = self.uc.reg_read(UC_X86_REG_R9)
+        
+        # Read parameters from stack
+        rsp = self.uc.reg_read(UC_X86_REG_RSP)
+        try:
+            stack_params = self.uc.mem_read(rsp + 0x20, 16)
+            wc_buffer_ptr = struct.unpack('<Q', stack_params[0:8])[0]
+            wc_count = struct.unpack('<Q', stack_params[8:16])[0]
+        except:
+            wc_buffer_ptr = 0
+            wc_count = 0
+        
+        if mb_count == 0xFFFFFFFF or mb_count == 0xFFFFFFFFFFFFFFFF:
+            # Calculate length
+            try:
+                mb_data = self.uc.mem_read(mb_str_ptr, 256)
+                mb_count = mb_data.find(b'\x00')
+                if mb_count == -1:
+                    mb_count = 256
+            except:
+                mb_count = 0
+        
+        # If buffer is NULL, return required size
+        if wc_buffer_ptr == 0:
+            # Return number of wide chars needed (same as byte count for ASCII)
+            result = mb_count + 1  # +1 for null terminator
+            self.uc.reg_write(UC_X86_REG_RAX, result)
+            return result
+        
+        # Convert (simplified: just copy bytes as wide chars)
+        try:
+            mb_data = self.uc.mem_read(mb_str_ptr, min(mb_count, 256))
+            wc_data = b''.join(bytes([b, 0]) for b in mb_data) + b'\x00\x00'
+            self.uc.mem_write(wc_buffer_ptr, wc_data[:wc_count*2])
+        except:
+            pass
+        
+        # Return number of wide chars written
+        result = min(mb_count + 1, wc_count)
+        self.uc.reg_write(UC_X86_REG_RAX, result)
+        return result
+    
+    def _stub_wide_char_to_multi_byte(self):
+        """WideCharToMultiByte() - convert wide char to multibyte"""
+        # RCX = code page, RDX = flags, R8 = wide char string, R9 = wide char count
+        # Stack: multibyte buffer, multibyte count, default char, used default char
+        code_page = self.uc.reg_read(UC_X86_REG_RCX)
+        flags = self.uc.reg_read(UC_X86_REG_RDX)
+        wc_str_ptr = self.uc.reg_read(UC_X86_REG_R8)
+        wc_count = self.uc.reg_read(UC_X86_REG_R9)
+        
+        # Read parameters from stack
+        rsp = self.uc.reg_read(UC_X86_REG_RSP)
+        try:
+            stack_params = self.uc.mem_read(rsp + 0x28, 16)
+            mb_buffer_ptr = struct.unpack('<Q', stack_params[0:8])[0]
+            mb_count = struct.unpack('<Q', stack_params[8:16])[0]
+        except:
+            mb_buffer_ptr = 0
+            mb_count = 0
+        
+        if wc_count == 0xFFFFFFFF or wc_count == 0xFFFFFFFFFFFFFFFF:
+            # Calculate length (count wide chars until null terminator)
+            try:
+                wc_data = self.uc.mem_read(wc_str_ptr, 512)
+                wc_count = 0
+                for i in range(0, len(wc_data), 2):
+                    if wc_data[i] == 0 and wc_data[i+1] == 0:
+                        break
+                    wc_count += 1
+            except:
+                wc_count = 0
+        
+        # If buffer is NULL, return required size
+        if mb_buffer_ptr == 0:
+            # Return number of bytes needed (same as wide char count for ASCII)
+            result = wc_count + 1  # +1 for null terminator
+            self.uc.reg_write(UC_X86_REG_RAX, result)
+            return result
+        
+        # Convert (simplified: just take low byte of each wide char)
+        try:
+            wc_data = self.uc.mem_read(wc_str_ptr, min(wc_count * 2, 512))
+            mb_data = bytes([wc_data[i] for i in range(0, len(wc_data), 2)]) + b'\x00'
+            self.uc.mem_write(mb_buffer_ptr, mb_data[:mb_count])
+        except:
+            pass
+        
+        # Return number of bytes written
+        result = min(wc_count + 1, mb_count)
+        self.uc.reg_write(UC_X86_REG_RAX, result)
+        return result
+    
+    def _stub_lc_map_string_w(self):
+        """LCMapStringW() - map string to locale"""
+        # RCX = locale, RDX = flags, R8 = source, R9 = source count
+        # Stack: dest buffer, dest count
+        locale = self.uc.reg_read(UC_X86_REG_RCX)
+        flags = self.uc.reg_read(UC_X86_REG_RDX)
+        src_ptr = self.uc.reg_read(UC_X86_REG_R8)
+        src_count = self.uc.reg_read(UC_X86_REG_R9)
+        
+        # Read parameters from stack
+        rsp = self.uc.reg_read(UC_X86_REG_RSP)
+        try:
+            stack_params = self.uc.mem_read(rsp + 0x28, 16)
+            dest_ptr = struct.unpack('<Q', stack_params[0:8])[0]
+            dest_count = struct.unpack('<Q', stack_params[8:16])[0]
+        except:
+            dest_ptr = 0
+            dest_count = 0
+        
+        # If dest is NULL, return required size
+        if dest_ptr == 0:
+            result = src_count
+            self.uc.reg_write(UC_X86_REG_RAX, result)
+            return result
+        
+        # Copy source to dest (simplified: no actual mapping)
+        try:
+            src_data = self.uc.mem_read(src_ptr, src_count * 2)  # Wide chars
+            self.uc.mem_write(dest_ptr, src_data[:dest_count*2])
+        except:
+            pass
+        
+        # Return number of chars written
+        result = min(src_count, dest_count)
+        self.uc.reg_write(UC_X86_REG_RAX, result)
+        return result
+    
+    def _stub_heap_create(self):
+        """HeapCreate() - create a heap"""
+        # RCX = options, RDX = initial size, R8 = maximum size
+        options = self.uc.reg_read(UC_X86_REG_RCX)
+        initial_size = self.uc.reg_read(UC_X86_REG_RDX)
+        max_size = self.uc.reg_read(UC_X86_REG_R8)
+        
+        # Return a fake heap handle (use process heap)
+        heap_handle = self.emu.os.heap.process_heap
+        self.uc.reg_write(UC_X86_REG_RAX, heap_handle)
+        return heap_handle
+    
+    def _stub_heap_set_information(self):
+        """HeapSetInformation() - set heap information"""
+        # RCX = heap, RDX = info class, R8 = info, R9 = info length
+        # Just return success
+        self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+        return 1
     
     # === DIRECTX STUBS (реалистичные) ===
     
@@ -1014,30 +1754,189 @@ class WinAPIStubs:
         
         print(f"[API] recv(socket={socket_fd}, length={length})")
         
-        if self.network:
-            # Используем реалистичную заглушку (имитирует задержку!)
-            data = self.network.recv(socket_fd, length)
-            try:
-                self.uc.mem_write(buffer_ptr, data)
-            except:
-                pass
-            self.uc.reg_write(UC_X86_REG_RAX, len(data))
-            return len(data)
-        else:
-            # Fallback: имитируем задержку получения
-            recv_time_ms = (length * 8) / (100 * 1000) + 30  # 100 Мбит/с + 30 мс пинг
-            ticks = int(recv_time_ms * self.emu.clock.cpu_freq_mhz * 1000)
-            self.emu.clock.advance(ticks)
-            
-            # Записываем нули в буфер
-            try:
-                self.uc.mem_write(buffer_ptr, b'\x00' * length)
-            except:
-                pass
-            
-            self.uc.reg_write(UC_X86_REG_RAX, length)  # Bytes received
-            print(f"  -> {length} bytes received ({recv_time_ms:.2f} ms)")
-            return length
+        # Возвращаем ошибку "сеть недоступна"
+        self.uc.reg_write(UC_X86_REG_RAX, 0xFFFFFFFFFFFFFFFF)  # SOCKET_ERROR (-1)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 10061  # WSAECONNREFUSED
+        print(f"  -> SOCKET_ERROR (network unavailable)")
+        return 0xFFFFFFFFFFFFFFFF
+    
+    def _stub_socket(self):
+        """socket() - создание сокета"""
+        # RCX = af, RDX = type, R8 = protocol
+        af = self.uc.reg_read(UC_X86_REG_RCX)
+        sock_type = self.uc.reg_read(UC_X86_REG_RDX)
+        protocol = self.uc.reg_read(UC_X86_REG_R8)
+        
+        print(f"[API] socket(af={af}, type={sock_type}, protocol={protocol})")
+        
+        # Возвращаем ошибку
+        self.uc.reg_write(UC_X86_REG_RAX, 0xFFFFFFFFFFFFFFFF)  # INVALID_SOCKET
+        print(f"  -> INVALID_SOCKET (network unavailable)")
+        return 0xFFFFFFFFFFFFFFFF
+    
+    def _stub_closesocket(self):
+        """closesocket() - закрытие сокета"""
+        # RCX = socket
+        socket_fd = self.uc.reg_read(UC_X86_REG_RCX)
+        print(f"[API] closesocket({socket_fd})")
+        self.uc.reg_write(UC_X86_REG_RAX, 0)  # Success
+        return 0
+    
+    def _stub_wsa_startup(self):
+        """WSAStartup() - инициализация Winsock"""
+        # RCX = version, RDX = WSAData pointer
+        version = self.uc.reg_read(UC_X86_REG_RCX)
+        wsa_data_ptr = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        print(f"[API] WSAStartup(version=0x{version:x})")
+        
+        # Заполняем структуру WSAData (упрощённо)
+        try:
+            wsa_data = struct.pack('<HH', version & 0xFFFF, version & 0xFFFF)
+            wsa_data += b'\x00' * 400  # Остальные поля
+            self.uc.mem_write(wsa_data_ptr, wsa_data[:408])
+        except:
+            pass
+        
+        # Возвращаем ошибку "сеть недоступна"
+        self.uc.reg_write(UC_X86_REG_RAX, 10047)  # WSAEAFNOSUPPORT
+        print(f"  -> WSAEAFNOSUPPORT (network unavailable)")
+        return 10047
+    
+    def _stub_wsa_cleanup(self):
+        """WSACleanup() - очистка Winsock"""
+        print(f"[API] WSACleanup()")
+        self.uc.reg_write(UC_X86_REG_RAX, 0)  # Success
+        return 0
+    
+    def _stub_wsa_get_last_error(self):
+        """WSAGetLastError() - получить код ошибки"""
+        error = getattr(self.emu.os, 'last_error', 10061)  # WSAECONNREFUSED
+        print(f"[API] WSAGetLastError() -> {error}")
+        self.uc.reg_write(UC_X86_REG_RAX, error)
+        return error
+    
+    # === WININET STUBS (для HTTP/HTTPS) ===
+    
+    def _stub_internet_open_a(self):
+        """InternetOpenA() - инициализация WinINet"""
+        # RCX = agent, RDX = access type, R8 = proxy, R9 = proxy bypass
+        print(f"[API] InternetOpenA()")
+        # Возвращаем NULL - сеть недоступна
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 12029  # ERROR_INTERNET_CANNOT_CONNECT
+        print(f"  -> NULL (network unavailable)")
+        return 0
+    
+    def _stub_internet_open_w(self):
+        """InternetOpenW() - инициализация WinINet (Unicode)"""
+        print(f"[API] InternetOpenW()")
+        # Возвращаем NULL - сеть недоступна
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 12029  # ERROR_INTERNET_CANNOT_CONNECT
+        print(f"  -> NULL (network unavailable)")
+        return 0
+    
+    def _stub_internet_open_url_a(self):
+        """InternetOpenUrlA() - открытие URL"""
+        print(f"[API] InternetOpenUrlA()")
+        # Возвращаем NULL - сеть недоступна
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 12029  # ERROR_INTERNET_CANNOT_CONNECT
+        print(f"  -> NULL (cannot connect)")
+        return 0
+    
+    def _stub_internet_open_url_w(self):
+        """InternetOpenUrlW() - открытие URL (Unicode)"""
+        print(f"[API] InternetOpenUrlW()")
+        # Возвращаем NULL - сеть недоступна
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 12029  # ERROR_INTERNET_CANNOT_CONNECT
+        print(f"  -> NULL (cannot connect)")
+        return 0
+    
+    def _stub_internet_read_file(self):
+        """InternetReadFile() - чтение данных из интернета"""
+        print(f"[API] InternetReadFile()")
+        # Возвращаем FALSE - ошибка
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 12029  # ERROR_INTERNET_CANNOT_CONNECT
+        print(f"  -> FALSE (cannot read)")
+        return 0
+    
+    def _stub_internet_close_handle(self):
+        """InternetCloseHandle() - закрытие интернет-хэндла"""
+        # RCX = handle
+        handle = self.uc.reg_read(UC_X86_REG_RCX)
+        print(f"[API] InternetCloseHandle(0x{handle:x})")
+        self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+        return 1
+    
+    def _stub_http_open_request_a(self):
+        """HttpOpenRequestA() - открытие HTTP запроса"""
+        print(f"[API] HttpOpenRequestA()")
+        # Возвращаем NULL - сеть недоступна
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 12029  # ERROR_INTERNET_CANNOT_CONNECT
+        print(f"  -> NULL (cannot connect)")
+        return 0
+    
+    def _stub_http_open_request_w(self):
+        """HttpOpenRequestW() - открытие HTTP запроса (Unicode)"""
+        print(f"[API] HttpOpenRequestW()")
+        # Возвращаем NULL - сеть недоступна
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 12029  # ERROR_INTERNET_CANNOT_CONNECT
+        print(f"  -> NULL (cannot connect)")
+        return 0
+    
+    def _stub_http_send_request_a(self):
+        """HttpSendRequestA() - отправка HTTP запроса"""
+        print(f"[API] HttpSendRequestA()")
+        # Возвращаем FALSE - ошибка
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 12029  # ERROR_INTERNET_CANNOT_CONNECT
+        print(f"  -> FALSE (cannot send)")
+        return 0
+    
+    def _stub_http_send_request_w(self):
+        """HttpSendRequestW() - отправка HTTP запроса (Unicode)"""
+        print(f"[API] HttpSendRequestW()")
+        # Возвращаем FALSE - ошибка
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 12029  # ERROR_INTERNET_CANNOT_CONNECT
+        print(f"  -> FALSE (cannot send)")
+        return 0
+    
+    def _stub_internet_connect_a(self):
+        """InternetConnectA() - подключение к серверу"""
+        print(f"[API] InternetConnectA()")
+        # Возвращаем NULL - сеть недоступна
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 12029  # ERROR_INTERNET_CANNOT_CONNECT
+        print(f"  -> NULL (cannot connect)")
+        return 0
+    
+    def _stub_internet_connect_w(self):
+        """InternetConnectW() - подключение к серверу (Unicode)"""
+        print(f"[API] InternetConnectW()")
+        # Возвращаем NULL - сеть недоступна
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 12029  # ERROR_INTERNET_CANNOT_CONNECT
+        print(f"  -> NULL (cannot connect)")
+        return 0
     
     def _read_string(self, ptr, max_len=256):
         """Вспомогательная функция: читает null-terminated строку"""
@@ -1048,3 +1947,176 @@ class WinAPIStubs:
                 break
             data += bytes([byte])
         return data.decode('ascii', errors='ignore')
+
+
+    # === GUI MESSAGE LOOP STUBS ===
+    
+    def _stub_get_message_a(self):
+        """GetMessageA() - get message from queue (blocks until message)"""
+        # RCX = MSG pointer, RDX = hwnd, R8 = filter min, R9 = filter max
+        msg_ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        print(f"[API] GetMessageA(msg=0x{msg_ptr:x})")
+        
+        # In command-line mode, return WM_QUIT immediately to exit message loop
+        # Fill MSG structure with WM_QUIT (0x0012)
+        try:
+            # typedef struct tagMSG {
+            #   HWND   hwnd;      // 8 bytes
+            #   UINT   message;   // 4 bytes
+            #   WPARAM wParam;    // 8 bytes
+            #   LPARAM lParam;    // 8 bytes
+            #   DWORD  time;      // 4 bytes
+            #   POINT  pt;        // 8 bytes (2x LONG)
+            # } MSG;
+            msg_data = struct.pack('<QIQIIQ',
+                0,      # hwnd
+                0x0012, # WM_QUIT
+                0,      # wParam
+                0,      # lParam
+                0,      # time
+                0       # pt (x, y)
+            )
+            self.uc.mem_write(msg_ptr, msg_data)
+        except:
+            pass
+        
+        # Return 0 for WM_QUIT (causes message loop to exit)
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        print(f"  -> 0 (WM_QUIT - exit message loop)")
+        return 0
+    
+    def _stub_get_message_w(self):
+        """GetMessageW() - get message from queue (Unicode)"""
+        # Same as GetMessageA
+        return self._stub_get_message_a()
+    
+    def _stub_peek_message_a(self):
+        """PeekMessageA() - check for message without blocking"""
+        # RCX = MSG pointer, RDX = hwnd, R8 = filter min, R9 = filter max
+        # Stack: remove flag
+        msg_ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        print(f"[API] PeekMessageA(msg=0x{msg_ptr:x})")
+        
+        # Return FALSE - no messages available
+        # This allows the program to continue without blocking
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        print(f"  -> FALSE (no messages)")
+        return 0
+    
+    def _stub_peek_message_w(self):
+        """PeekMessageW() - check for message without blocking (Unicode)"""
+        return self._stub_peek_message_a()
+    
+    def _stub_dispatch_message_a(self):
+        """DispatchMessageA() - dispatch message to window procedure"""
+        # RCX = MSG pointer
+        print(f"[API] DispatchMessageA()")
+        
+        # Return 0 (message processed)
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        print(f"  -> 0 (message dispatched)")
+        return 0
+    
+    def _stub_dispatch_message_w(self):
+        """DispatchMessageW() - dispatch message to window procedure (Unicode)"""
+        return self._stub_dispatch_message_a()
+    
+    def _stub_translate_message(self):
+        """TranslateMessage() - translate virtual-key messages"""
+        # RCX = MSG pointer
+        print(f"[API] TranslateMessage()")
+        
+        # Return FALSE (no translation needed)
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        return 0
+    
+    def _stub_post_quit_message(self):
+        """PostQuitMessage() - post WM_QUIT to message queue"""
+        # RCX = exit code
+        exit_code = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        print(f"[API] PostQuitMessage({exit_code})")
+        print(f"  -> Stopping emulation (application exit)")
+        
+        # Stop emulation
+        self.uc.emu_stop()
+        return 0
+    
+    def _stub_def_window_proc_a(self):
+        """DefWindowProcA() - default window procedure"""
+        # RCX = hwnd, RDX = msg, R8 = wParam, R9 = lParam
+        hwnd = self.uc.reg_read(UC_X86_REG_RCX)
+        msg = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        print(f"[API] DefWindowProcA(hwnd=0x{hwnd:x}, msg=0x{msg:x})")
+        
+        # Return 0 (default processing)
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        return 0
+    
+    def _stub_def_window_proc_w(self):
+        """DefWindowProcW() - default window procedure (Unicode)"""
+        return self._stub_def_window_proc_a()
+    
+    def _stub_wait_for_single_object(self):
+        """WaitForSingleObject() - wait for object to be signaled"""
+        # RCX = handle, RDX = timeout
+        handle = self.uc.reg_read(UC_X86_REG_RCX)
+        timeout = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        print(f"[API] WaitForSingleObject(handle=0x{handle:x}, timeout={timeout})")
+        
+        # Advance virtual time by timeout (if not INFINITE)
+        if timeout != 0xFFFFFFFF and timeout != 0xFFFFFFFFFFFFFFFF:
+            ticks = int(timeout * self.emu.clock.cpu_freq_mhz * 1000)
+            self.emu.clock.advance(ticks)
+            print(f"  -> Advanced {timeout} ms")
+        
+        # Return WAIT_OBJECT_0 (0) - object is signaled
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        print(f"  -> WAIT_OBJECT_0 (signaled)")
+        return 0
+    
+    def _stub_wait_for_multiple_objects(self):
+        """WaitForMultipleObjects() - wait for multiple objects"""
+        # RCX = count, RDX = handles array, R8 = wait all, R9 = timeout
+        count = self.uc.reg_read(UC_X86_REG_RCX)
+        handles_ptr = self.uc.reg_read(UC_X86_REG_RDX)
+        wait_all = self.uc.reg_read(UC_X86_REG_R8)
+        timeout = self.uc.reg_read(UC_X86_REG_R9)
+        
+        print(f"[API] WaitForMultipleObjects(count={count}, wait_all={wait_all}, timeout={timeout})")
+        
+        # Advance virtual time by timeout (if not INFINITE)
+        if timeout != 0xFFFFFFFF and timeout != 0xFFFFFFFFFFFFFFFF:
+            ticks = int(timeout * self.emu.clock.cpu_freq_mhz * 1000)
+            self.emu.clock.advance(ticks)
+            print(f"  -> Advanced {timeout} ms")
+        
+        # Return WAIT_OBJECT_0 (0) - first object is signaled
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        print(f"  -> WAIT_OBJECT_0 (signaled)")
+        return 0
+    
+    def _stub_msg_wait_for_multiple_objects(self):
+        """MsgWaitForMultipleObjects() - wait for objects or messages"""
+        # RCX = count, RDX = handles array, R8 = wait all, R9 = timeout
+        # Stack: wake mask
+        count = self.uc.reg_read(UC_X86_REG_RCX)
+        handles_ptr = self.uc.reg_read(UC_X86_REG_RDX)
+        wait_all = self.uc.reg_read(UC_X86_REG_R8)
+        timeout = self.uc.reg_read(UC_X86_REG_R9)
+        
+        print(f"[API] MsgWaitForMultipleObjects(count={count}, wait_all={wait_all}, timeout={timeout})")
+        
+        # Advance virtual time by a small amount (simulate checking for messages)
+        ticks = int(10 * self.emu.clock.cpu_freq_mhz * 1000)  # 10 ms
+        self.emu.clock.advance(ticks)
+        
+        # Return WAIT_TIMEOUT (0x102) - no objects signaled, no messages
+        # This allows the program to continue without blocking
+        self.uc.reg_write(UC_X86_REG_RAX, 0x102)
+        print(f"  -> WAIT_TIMEOUT (continue execution)")
+        return 0x102

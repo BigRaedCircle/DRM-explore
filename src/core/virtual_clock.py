@@ -21,6 +21,10 @@ class VirtualClock:
         
         # Для QueryPerformanceCounter (обычно 10 MHz)
         self.qpc_frequency = 10_000_000  # Hz
+        
+        # RDTSC offset - start from zero for clean timing checks
+        # Anti-tamper programs expect small, consistent deltas
+        self.rdtsc_offset = 0
     
     def advance(self, cycles=1):
         """Продвинуть виртуальное время на N тактов"""
@@ -32,7 +36,7 @@ class VirtualClock:
         Эмуляция инструкции RDTSC (Read Time-Stamp Counter)
         Возвращает: (EDX:EAX) — 64-битный счётчик тактов
         """
-        return self.ticks
+        return self.ticks + self.rdtsc_offset
     
     def get_tick_count(self):
         """
