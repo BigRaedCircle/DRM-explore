@@ -125,13 +125,23 @@ class PELoader:
         # Use counter to create unique addresses
         if not hasattr(self, '_dummy_stub_counter'):
             self._dummy_stub_counter = 0
+            # Выделяем память для dummy stubs (64KB должно хватить)
+            try:
+                dummy_region_base = self.emu.winapi.STUB_BASE + 0xF000
+                dummy_region_size = 0x10000  # 64KB
+                self.emu.uc.mem_map(dummy_region_base, dummy_region_size)
+                print(f"      [*] Allocated dummy stub region: 0x{dummy_region_base:x} ({dummy_region_size} bytes)")
+            except Exception as e:
+                # Память уже выделена или ошибка
+                pass
         
         dummy_base = self.emu.winapi.STUB_BASE + 0xF000 + (self._dummy_stub_counter * 16)
         self._dummy_stub_counter += 1
         
-        # Write simple stub: XOR RAX, RAX; RET
+        # Write smarter stub: MOV RAX, 1; RET (возвращаем SUCCESS вместо NULL)
+        # Большинство WinAPI функций возвращают TRUE (1) при успехе
         stub_code = bytes([
-            0x48, 0x31, 0xC0,  # XOR RAX, RAX
+            0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00,  # MOV RAX, 1
             0xC3,              # RET
         ])
         
