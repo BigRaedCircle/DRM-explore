@@ -7,6 +7,7 @@ Strategy: Call REAL Windows functions, not emulate them!
 """
 
 import ctypes
+import struct
 from ctypes import wintypes
 from unicorn.x86_const import *
 
@@ -26,6 +27,12 @@ class WinAPIStubs:
         # Stub addresses (allocate in high memory)
         self.STUB_BASE = 0x7FFF0000
         self.stubs = {}
+        
+        # Реалистичные заглушки (если доступны)
+        self.system_info = getattr(emulator, 'system_info', None)
+        self.vfs = getattr(emulator, 'vfs', None)
+        self.directx = getattr(emulator, 'directx', None)
+        self.network = getattr(emulator, 'network', None)
         
         self._setup_stubs()
     
@@ -81,6 +88,17 @@ class WinAPIStubs:
             
             # === EXIT ===
             ('ExitProcess', self._stub_exit),
+            
+            # === DIRECTX (реалистичные заглушки) ===
+            ('D3D11CreateDevice', self._stub_d3d11_create_device),
+            ('CreateSwapChain', self._stub_create_swap_chain),
+            ('Present', self._stub_present),
+            ('GetAdapterDesc', self._stub_get_adapter_desc),
+            
+            # === NETWORK (реалистичные заглушки) ===
+            ('connect', self._stub_connect),
+            ('send', self._stub_send),
+            ('recv', self._stub_recv),
         ]
         
         addr = self.STUB_BASE
@@ -400,14 +418,23 @@ class WinAPIStubs:
             return self.handle_unknown_function("GetProcAddress")
     
     def _stub_create_file_a(self):
-        """CreateFileA() - заглушка для открытия файла"""
+        """CreateFileA() - открытие файла через VirtualFileSystem"""
         # RCX = filename
         ptr = self.uc.reg_read(UC_X86_REG_RCX)
         try:
             filename = self._read_string(ptr)
             print(f"[API] CreateFileA('{filename}')")
             
-            # Возвращаем фейковый handle (не INVALID_HANDLE_VALUE)
+            # Используем VirtualFileSystem если доступна
+            if self.vfs:
+                handle = self.vfs.open(filename, 'rb')
+                if handle:
+                    self.uc.reg_write(UC_X86_REG_RAX, handle)
+                    file_size = self.vfs.get_size(handle)
+                    print(f"  -> 0x{handle:x} (VFS handle, size={file_size} bytes)")
+                    return handle
+            
+            # Fallback: фейковый handle
             fake_handle = 0x80000000 + hash(filename) % 0x10000000
             self.uc.reg_write(UC_X86_REG_RAX, fake_handle)
             print(f"  -> 0x{fake_handle:x} (fake file handle)")
@@ -418,17 +445,35 @@ class WinAPIStubs:
             return 0xFFFFFFFFFFFFFFFF
     
     def _stub_read_file(self):
-        """ReadFile() - заглушка для чтения файла"""
+        """ReadFile() - чтение файла через VirtualFileSystem"""
         # RCX = handle, RDX = buffer, R8 = bytes to read, R9 = bytes read
         handle = self.uc.reg_read(UC_X86_REG_RCX)
         buffer = self.uc.reg_read(UC_X86_REG_RDX)
         size = self.uc.reg_read(UC_X86_REG_R8)
+        bytes_read_ptr = self.uc.reg_read(UC_X86_REG_R9)
         
         print(f"[API] ReadFile(0x{handle:x}, 0x{buffer:x}, {size})")
         
-        # Записываем нули в буфер (имитация чтения)
+        # Используем VirtualFileSystem если доступна
+        if self.vfs:
+            data = self.vfs.read(handle, size)
+            if data:
+                try:
+                    self.uc.mem_write(buffer, data)
+                    # Записываем количество прочитанных байт
+                    if bytes_read_ptr:
+                        self.uc.mem_write(bytes_read_ptr, len(data).to_bytes(4, 'little'))
+                    self.uc.reg_write(UC_X86_REG_RAX, 1)
+                    print(f"  -> TRUE (read {len(data)} bytes from VFS)")
+                    return 1
+                except:
+                    pass
+        
+        # Fallback: записываем нули в буфер (имитация чтения)
         try:
             self.uc.mem_write(buffer, b'\x00' * size)
+            if bytes_read_ptr:
+                self.uc.mem_write(bytes_read_ptr, size.to_bytes(4, 'little'))
         except:
             pass
         
@@ -438,11 +483,17 @@ class WinAPIStubs:
         return 1
     
     def _stub_close_handle(self):
-        """CloseHandle() - заглушка для закрытия handle"""
+        """CloseHandle() - закрытие handle через VirtualFileSystem"""
         handle = self.uc.reg_read(UC_X86_REG_RCX)
         print(f"[API] CloseHandle(0x{handle:x})")
         
-        # Всегда успех
+        # Используем VirtualFileSystem если доступна
+        if self.vfs and self.vfs.close(handle):
+            self.uc.reg_write(UC_X86_REG_RAX, 1)
+            print(f"  -> TRUE (closed VFS handle)")
+            return 1
+        
+        # Fallback: всегда успех
         self.uc.reg_write(UC_X86_REG_RAX, 1)
         print(f"  -> TRUE")
         return 1
@@ -478,21 +529,37 @@ class WinAPIStubs:
         return 0
     
     def _stub_get_system_info(self):
-        """GetSystemInfo() - заглушка для информации о системе"""
+        """GetSystemInfo() - реальная информация о системе"""
         # RCX = pointer to SYSTEM_INFO
         ptr = self.uc.reg_read(UC_X86_REG_RCX)
         
         print(f"[API] GetSystemInfo(0x{ptr:x})")
         
-        # Заполняем минимальную структуру SYSTEM_INFO
-        # dwPageSize = 4096, dwNumberOfProcessors = 8, etc.
-        system_info = struct.pack('<IIIQQIIII',
+        # Используем реальные данные если доступны
+        if self.system_info:
+            cpu_cores = self.system_info.cpu_cores
+            print(f"  -> Using REAL system data: {cpu_cores} cores")
+        else:
+            cpu_cores = 8  # Fallback
+        
+        # Заполняем структуру SYSTEM_INFO с реальными данными
+        # typedef struct _SYSTEM_INFO {
+        #   DWORD dwPageSize;                    // 4 bytes
+        #   LPVOID lpMinimumApplicationAddress; // 8 bytes (pointer)
+        #   LPVOID lpMaximumApplicationAddress; // 8 bytes (pointer)
+        #   DWORD_PTR dwActiveProcessorMask;    // 8 bytes
+        #   DWORD dwNumberOfProcessors;         // 4 bytes
+        #   DWORD dwProcessorType;              // 4 bytes
+        #   DWORD dwAllocationGranularity;      // 4 bytes
+        #   WORD wProcessorLevel;               // 2 bytes
+        #   WORD wProcessorRevision;            // 2 bytes
+        # } SYSTEM_INFO;
+        system_info = struct.pack('<IQQQQIIHH',
             4096,      # dwPageSize
             0x10000,   # lpMinimumApplicationAddress
-            0x7FFFFFFF, # lpMaximumApplicationAddress (low)
-            0,         # lpMaximumApplicationAddress (high)
-            0xFF,      # dwActiveProcessorMask (8 cores)
-            8,         # dwNumberOfProcessors
+            0x7FFFFFFF000,  # lpMaximumApplicationAddress
+            (1 << cpu_cores) - 1,  # dwActiveProcessorMask (маска для всех ядер)
+            cpu_cores, # dwNumberOfProcessors (REAL)
             0,         # dwProcessorType
             4096,      # dwAllocationGranularity
             0,         # wProcessorLevel
@@ -501,7 +568,7 @@ class WinAPIStubs:
         
         try:
             self.uc.mem_write(ptr, system_info)
-            print(f"  -> filled (8 cores, 4KB pages)")
+            print(f"  -> filled ({cpu_cores} cores, 4KB pages)")
         except:
             pass
         
@@ -527,6 +594,196 @@ class WinAPIStubs:
         self.uc.reg_write(UC_X86_REG_RAX, 1)
         print(f"  -> TRUE")
         return 1
+    
+    # === DIRECTX STUBS (реалистичные) ===
+    
+    def _stub_d3d11_create_device(self):
+        """D3D11CreateDevice() - создание DirectX устройства"""
+        print(f"[API] D3D11CreateDevice()")
+        
+        if self.directx:
+            # Используем реалистичную заглушку
+            result = self.directx.D3D11CreateDevice(None, 0, None, 0, None, 0)
+            self.uc.reg_write(UC_X86_REG_RAX, result[0])  # HRESULT
+            print(f"  -> S_OK (realistic DirectX stub)")
+            return result[0]
+        else:
+            # Fallback
+            self.uc.reg_write(UC_X86_REG_RAX, 0)  # S_OK
+            print(f"  -> S_OK (fallback)")
+            return 0
+    
+    def _stub_create_swap_chain(self):
+        """CreateSwapChain() - создание swap chain"""
+        print(f"[API] CreateSwapChain()")
+        
+        if self.directx:
+            # Используем реалистичную заглушку
+            desc = {'width': 1920, 'height': 1080, 'format': 'DXGI_FORMAT_R8G8B8A8_UNORM'}
+            result = self.directx.CreateSwapChain(None, desc)
+            self.uc.reg_write(UC_X86_REG_RAX, result[0])  # HRESULT
+            print(f"  -> S_OK (realistic DirectX stub)")
+            return result[0]
+        else:
+            # Fallback
+            self.uc.reg_write(UC_X86_REG_RAX, 0)  # S_OK
+            print(f"  -> S_OK (fallback)")
+            return 0
+    
+    def _stub_present(self):
+        """Present() - презентация кадра (vsync)"""
+        # RCX = sync_interval
+        sync_interval = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        print(f"[API] Present(sync_interval={sync_interval})")
+        
+        if self.directx:
+            # Используем реалистичную заглушку (продвигает VirtualClock!)
+            result = self.directx.Present(sync_interval)
+            self.uc.reg_write(UC_X86_REG_RAX, result)
+            return result
+        else:
+            # Fallback: имитируем задержку vsync
+            if sync_interval > 0:
+                # 60 FPS = 16.67 мс на кадр
+                ticks = int(16.67 * self.emu.clock.cpu_freq_mhz * 1000)
+                self.emu.clock.advance(ticks)
+                print(f"  -> S_OK (vsync wait: 16.67 ms)")
+            else:
+                # Без vsync — минимальная задержка (~1 мс)
+                ticks = int(1 * self.emu.clock.cpu_freq_mhz * 1000)
+                self.emu.clock.advance(ticks)
+                print(f"  -> S_OK (no vsync, 1 ms)")
+            
+            self.uc.reg_write(UC_X86_REG_RAX, 0)  # S_OK
+            return 0
+    
+    def _stub_get_adapter_desc(self):
+        """GetAdapterDesc() - получить описание GPU"""
+        # RCX = pointer to DXGI_ADAPTER_DESC
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        print(f"[API] GetAdapterDesc(0x{ptr:x})")
+        
+        if self.directx:
+            # Используем реалистичную заглушку
+            desc = self.directx.GetAdapterDesc()
+            
+            # Записываем структуру DXGI_ADAPTER_DESC (упрощённо)
+            try:
+                # Description (wide string, 128 chars)
+                desc_str = desc['Description'].encode('utf-16le')[:256]
+                desc_str += b'\x00' * (256 - len(desc_str))
+                
+                # Остальные поля
+                adapter_data = desc_str + struct.pack('<IIIQQQ',
+                    desc['VendorId'],
+                    desc['DeviceId'],
+                    desc['SubSysId'],
+                    desc['Revision'],
+                    desc['DedicatedVideoMemory'],
+                    desc['DedicatedSystemMemory'],
+                    desc['SharedSystemMemory']
+                )
+                
+                self.uc.mem_write(ptr, adapter_data)
+                print(f"  -> {desc['Description']}, VRAM: {desc['DedicatedVideoMemory'] // (1024*1024)} MB")
+            except:
+                pass
+            
+            self.uc.reg_write(UC_X86_REG_RAX, 0)  # S_OK
+            return 0
+        else:
+            # Fallback
+            self.uc.reg_write(UC_X86_REG_RAX, 0)  # S_OK
+            print(f"  -> S_OK (fallback)")
+            return 0
+    
+    # === NETWORK STUBS (реалистичные) ===
+    
+    def _stub_connect(self):
+        """connect() - подключение к серверу"""
+        # RCX = socket, RDX = sockaddr, R8 = addrlen
+        socket_fd = self.uc.reg_read(UC_X86_REG_RCX)
+        sockaddr_ptr = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        print(f"[API] connect(socket={socket_fd})")
+        
+        if self.network:
+            # Используем реалистичную заглушку (имитирует задержку!)
+            result = self.network.connect("example.com", 80)
+            self.uc.reg_write(UC_X86_REG_RAX, result)
+            return result
+        else:
+            # Fallback: имитируем задержку подключения (~30 мс)
+            ticks = int(30 * self.emu.clock.cpu_freq_mhz * 1000)
+            self.emu.clock.advance(ticks)
+            self.uc.reg_write(UC_X86_REG_RAX, 0)  # Success
+            print(f"  -> 0 (connected, 30 ms latency)")
+            return 0
+    
+    def _stub_send(self):
+        """send() - отправка данных"""
+        # RCX = socket, RDX = buffer, R8 = length, R9 = flags
+        socket_fd = self.uc.reg_read(UC_X86_REG_RCX)
+        buffer_ptr = self.uc.reg_read(UC_X86_REG_RDX)
+        length = self.uc.reg_read(UC_X86_REG_R8)
+        
+        print(f"[API] send(socket={socket_fd}, length={length})")
+        
+        # Читаем данные из буфера
+        try:
+            data = self.uc.mem_read(buffer_ptr, length)
+        except:
+            data = b'\x00' * length
+        
+        if self.network:
+            # Используем реалистичную заглушку (имитирует задержку!)
+            result = self.network.send(socket_fd, data)
+            self.uc.reg_write(UC_X86_REG_RAX, result)
+            return result
+        else:
+            # Fallback: имитируем задержку отправки
+            send_time_ms = (length * 8) / (100 * 1000) + 30  # 100 Мбит/с + 30 мс пинг
+            ticks = int(send_time_ms * self.emu.clock.cpu_freq_mhz * 1000)
+            self.emu.clock.advance(ticks)
+            self.uc.reg_write(UC_X86_REG_RAX, length)  # Bytes sent
+            print(f"  -> {length} bytes sent ({send_time_ms:.2f} ms)")
+            return length
+    
+    def _stub_recv(self):
+        """recv() - получение данных"""
+        # RCX = socket, RDX = buffer, R8 = length, R9 = flags
+        socket_fd = self.uc.reg_read(UC_X86_REG_RCX)
+        buffer_ptr = self.uc.reg_read(UC_X86_REG_RDX)
+        length = self.uc.reg_read(UC_X86_REG_R8)
+        
+        print(f"[API] recv(socket={socket_fd}, length={length})")
+        
+        if self.network:
+            # Используем реалистичную заглушку (имитирует задержку!)
+            data = self.network.recv(socket_fd, length)
+            try:
+                self.uc.mem_write(buffer_ptr, data)
+            except:
+                pass
+            self.uc.reg_write(UC_X86_REG_RAX, len(data))
+            return len(data)
+        else:
+            # Fallback: имитируем задержку получения
+            recv_time_ms = (length * 8) / (100 * 1000) + 30  # 100 Мбит/с + 30 мс пинг
+            ticks = int(recv_time_ms * self.emu.clock.cpu_freq_mhz * 1000)
+            self.emu.clock.advance(ticks)
+            
+            # Записываем нули в буфер
+            try:
+                self.uc.mem_write(buffer_ptr, b'\x00' * length)
+            except:
+                pass
+            
+            self.uc.reg_write(UC_X86_REG_RAX, length)  # Bytes received
+            print(f"  -> {length} bytes received ({recv_time_ms:.2f} ms)")
+            return length
     
     def _read_string(self, ptr, max_len=256):
         """Вспомогательная функция: читает null-terminated строку"""

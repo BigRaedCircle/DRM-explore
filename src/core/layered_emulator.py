@@ -20,6 +20,7 @@ from virtual_clock import VirtualClock
 from mini_os import MiniOS
 from winapi_stubs import WinAPIStubs
 from pe_loader import PELoader
+from realistic_stubs import SystemInfo, VirtualFileSystem, DirectXStubs, NetworkStubs
 
 
 class LayeredEmulator:
@@ -31,6 +32,12 @@ class LayeredEmulator:
         
         # Виртуальные часы
         self.clock = VirtualClock(cpu_freq_mhz)
+        
+        # Реалистичные заглушки для периферии
+        self.system_info = SystemInfo()
+        self.vfs = VirtualFileSystem(base_path=".")
+        self.directx = DirectXStubs(self.system_info, self.clock)
+        self.network = NetworkStubs(self.clock)
         
         # Минимальный OS-слой
         self.os = MiniOS(self.uc, self.clock)
