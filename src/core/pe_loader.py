@@ -125,6 +125,7 @@ class PELoader:
         # Use counter to create unique addresses
         if not hasattr(self, '_dummy_stub_counter'):
             self._dummy_stub_counter = 0
+            self._dummy_stub_names = {}  # Map address -> function name
             # Выделяем память для dummy stubs (64KB должно хватить)
             try:
                 dummy_region_base = self.emu.winapi.STUB_BASE + 0xF000
@@ -137,6 +138,9 @@ class PELoader:
         
         dummy_base = self.emu.winapi.STUB_BASE + 0xF000 + (self._dummy_stub_counter * 16)
         self._dummy_stub_counter += 1
+        
+        # Save function name for this stub
+        self._dummy_stub_names[dummy_base] = func_name
         
         # Write smarter stub: MOV RAX, 1; RET (возвращаем SUCCESS вместо NULL)
         # Большинство WinAPI функций возвращают TRUE (1) при успехе

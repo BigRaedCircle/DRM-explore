@@ -20,7 +20,13 @@ def test_cpuz_report_generation():
     print("ТЕСТ: CPU-Z генерация отчёта (cpuz.exe -txt=report)")
     print("=" * 70)
     
-    cpuz_path = "sandbox/CPU-Z/cpuz.exe"
+    # Сохраняем текущую директорию
+    original_dir = os.getcwd()
+    
+    # Переходим в папку CPU-Z
+    os.chdir("sandbox/CPU-Z")
+    
+    cpuz_path = "cpuz.exe"
     report_path = "report.txt"
     
     # Удаляем старый отчёт если есть
@@ -30,6 +36,7 @@ def test_cpuz_report_generation():
     
     print(f"\n[*] Загружаем: {cpuz_path}")
     print(f"[*] Аргументы: -txt=report")
+    print(f"[*] Рабочая директория: {os.getcwd()}")
     
     try:
         emu = LayeredEmulator(cpu_freq_mhz=3000)
@@ -60,14 +67,14 @@ def test_cpuz_report_generation():
         
         print(f"\n[*] Начинаем эмуляцию...")
         print(f"[*] Entry point: 0x{entry_point:x}")
-        print(f"[*] Максимум инструкций: 1,000,000")
+        print(f"[*] Максимум инструкций: 10,000,000")
         print("-" * 70)
         
         # Запускаем эмуляцию с большим лимитом
         exit_code = emu.run(
             start_addr=entry_point,
             end_addr=0,
-            max_instructions=1000000,
+            max_instructions=10000000,  # 10 миллионов инструкций
             verbose=False  # Отключаем детальный вывод
         )
         
@@ -121,6 +128,9 @@ def test_cpuz_report_generation():
         import traceback
         traceback.print_exc()
         return False
+    finally:
+        # Возвращаемся в исходную директорию
+        os.chdir(original_dir)
 
 
 def main():

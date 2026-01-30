@@ -1,0 +1,180 @@
+{
+  "functions": [
+    {
+      "name": "Direct3DCreate9",
+      "return_type": "IDirect3D9*",
+      "parameters": [
+        [
+          "UINT",
+          "SDKVersion"
+        ]
+      ],
+      "dll_name": "d3d9.dll",
+      "header_file": "d3d9.h"
+    },
+    {
+      "name": "D3D11CreateDevice",
+      "return_type": "HRESULT",
+      "parameters": [
+        [
+          "IDXGIAdapter*",
+          "pAdapter"
+        ],
+        [
+          "D3D_DRIVER_TYPE",
+          "DriverType"
+        ],
+        [
+          "HMODULE",
+          "Software"
+        ],
+        [
+          "UINT",
+          "Flags"
+        ],
+        [
+          "reads_opt_( FeatureLevels ) CONST D3D_FEATURE_LEVEL*",
+          "pFeatureLevels"
+        ],
+        [
+          "UINT",
+          "FeatureLevels"
+        ],
+        [
+          "UINT",
+          "SDKVersion"
+        ],
+        [
+          "_COM_Outptr_opt_ ID3D11Device**",
+          "ppDevice"
+        ],
+        [
+          "D3D_FEATURE_LEVEL*",
+          "pFeatureLevel"
+        ],
+        [
+          "_COM_Outptr_opt_ ID3D11DeviceContext**",
+          "ppImmediateContext"
+        ]
+      ],
+      "dll_name": "d3d11.dll",
+      "header_file": "d3d11.h"
+    },
+    {
+      "name": "D3D11CreateDeviceAndSwapChain",
+      "return_type": "HRESULT",
+      "parameters": [
+        [
+          "IDXGIAdapter*",
+          "pAdapter"
+        ],
+        [
+          "D3D_DRIVER_TYPE",
+          "DriverType"
+        ],
+        [
+          "HMODULE",
+          "Software"
+        ],
+        [
+          "UINT",
+          "Flags"
+        ],
+        [
+          "reads_opt_( FeatureLevels ) CONST D3D_FEATURE_LEVEL*",
+          "pFeatureLevels"
+        ],
+        [
+          "UINT",
+          "FeatureLevels"
+        ],
+        [
+          "UINT",
+          "SDKVersion"
+        ],
+        [
+          "CONST DXGI_SWAP_CHAIN_DESC*",
+          "pSwapChainDesc"
+        ],
+        [
+          "_COM_Outptr_opt_ IDXGISwapChain**",
+          "ppSwapChain"
+        ],
+        [
+          "_COM_Outptr_opt_ ID3D11Device**",
+          "ppDevice"
+        ],
+        [
+          "D3D_FEATURE_LEVEL*",
+          "pFeatureLevel"
+        ],
+        [
+          "_COM_Outptr_opt_ ID3D11DeviceContext**",
+          "ppImmediateContext"
+        ]
+      ],
+      "dll_name": "d3d11.dll",
+      "header_file": "d3d11.h"
+    },
+    {
+      "name": "D3D12CreateDevice",
+      "return_type": "HRESULT",
+      "parameters": [
+        [
+          "IUnknown*",
+          "pAdapter"
+        ],
+        [
+          "D3D_FEATURE_LEVEL",
+          "MinimumFeatureLevel"
+        ],
+        [
+          "REFIID",
+          "riid"
+        ],
+        [
+          "_COM_Outptr_opt_ void**",
+          "ppDevice"
+        ]
+      ],
+      "dll_name": "d3d12.dll",
+      "header_file": "d3d12.h"
+    },
+    {
+      "name": "CreateDXGIFactory",
+      "return_type": "HRESULT",
+      "parameters": [
+        [
+          "REFIID",
+          "riid"
+        ],
+        [
+          "_COM_Outptr_ void**",
+          "ppFactory"
+        ]
+      ],
+      "dll_name": "dxgi.dll",
+      "header_file": "dxgi.h"
+    },
+    {
+      "name": "CreateDXGIFactory1",
+      "return_type": "HRESULT",
+      "parameters": [
+        [
+          "REFIID",
+          "riid"
+        ],
+        [
+          "_COM_Outptr_ void**",
+          "ppFactory"
+        ]
+      ],
+      "dll_name": "dxgi.dll",
+      "header_file": "dxgi.h"
+    }
+  ],
+  "interfaces": [],
+  "total_functions": 6,
+  "total_interfaces": 0,
+  "total_methods": 0
+}
