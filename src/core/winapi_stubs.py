@@ -45,16 +45,36 @@ class WinAPIStubs:
             ('HeapFree', self._stub_heap_free),
             ('HeapSize', self._stub_heap_size),
             ('HeapReAlloc', self._stub_heap_realloc),
+            ('VirtualProtect', self._stub_virtual_protect),
             
             # === PROCESS/THREAD INFO (call real Windows) ===
             ('GetCurrentProcessId', self._stub_get_current_process_id),
             ('GetCurrentThreadId', self._stub_get_current_thread_id),
             ('GetCurrentProcess', self._stub_get_current_process),
             
+            # === DLL/MODULE LOADING (заглушки) ===
+            ('LoadLibraryA', self._stub_load_library_a),
+            ('LoadLibraryW', self._stub_load_library_a),  # Используем ту же заглушку
+            ('GetProcAddress', self._stub_get_proc_address),
+            ('GetModuleHandleW', self._stub_get_module_handle_w),
+            
+            # === FILE I/O (заглушки) ===
+            ('CreateFileA', self._stub_create_file_a),
+            ('CreateFileW', self._stub_create_file_a),  # Используем ту же заглушку
+            ('ReadFile', self._stub_read_file),
+            ('CloseHandle', self._stub_close_handle),
+            
+            # === UI (заглушки) ===
+            ('MessageBoxA', self._stub_message_box_a),
+            ('MessageBoxW', self._stub_message_box_a),
+            
+            # === SYSTEM INFO (заглушки) ===
+            ('GetSystemInfo', self._stub_get_system_info),
+            ('Sleep', self._stub_sleep),
+            
             # === CRT SUPPORT ===
             ('GetCommandLineA', self._stub_get_command_line_a),
             ('GetCommandLineW', self._stub_get_command_line_w),
-            ('GetModuleHandleW', self._stub_get_module_handle_w),
             ('GetStartupInfoW', self._stub_get_startup_info_w),
             ('InitializeSListHead', self._stub_initialize_slist_head),
             ('SetUnhandledExceptionFilter', self._stub_set_unhandled_exception_filter),
@@ -335,3 +355,185 @@ class WinAPIStubs:
             self.emu.os.last_error = 126
         
         return 0
+
+
+    # === ЗАГЛУШКИ ДЛЯ "ПЕРИФЕРИИ" (не блокируют основную ветку) ===
+    
+    def _stub_load_library_a(self):
+        """LoadLibraryA() - заглушка для загрузки DLL"""
+        # RCX = имя DLL
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        try:
+            dll_name = self._read_string(ptr)
+            print(f"[API] LoadLibraryA('{dll_name}')")
+            
+            # Возвращаем фейковый handle (не NULL, чтобы код продолжился)
+            fake_handle = 0x70000000 + hash(dll_name) % 0x10000000
+            self.uc.reg_write(UC_X86_REG_RAX, fake_handle)
+            print(f"  -> 0x{fake_handle:x} (fake handle)")
+            return fake_handle
+        except:
+            return self.handle_missing_dll("unknown.dll")
+    
+    def _stub_get_proc_address(self):
+        """GetProcAddress() - заглушка для получения адреса функции"""
+        # RCX = module handle, RDX = function name
+        module = self.uc.reg_read(UC_X86_REG_RCX)
+        name_ptr = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        try:
+            func_name = self._read_string(name_ptr)
+            print(f"[API] GetProcAddress(0x{module:x}, '{func_name}')")
+            
+            # Проверяем, есть ли у нас stub для этой функции
+            if func_name in self.stubs:
+                addr = self.stubs[func_name]['address']
+                print(f"  -> 0x{addr:x} (our stub)")
+            else:
+                # Возвращаем фейковый адрес (не NULL)
+                addr = 0x71000000 + hash(func_name) % 0x10000000
+                print(f"  -> 0x{addr:x} (fake address)")
+            
+            self.uc.reg_write(UC_X86_REG_RAX, addr)
+            return addr
+        except:
+            return self.handle_unknown_function("GetProcAddress")
+    
+    def _stub_create_file_a(self):
+        """CreateFileA() - заглушка для открытия файла"""
+        # RCX = filename
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        try:
+            filename = self._read_string(ptr)
+            print(f"[API] CreateFileA('{filename}')")
+            
+            # Возвращаем фейковый handle (не INVALID_HANDLE_VALUE)
+            fake_handle = 0x80000000 + hash(filename) % 0x10000000
+            self.uc.reg_write(UC_X86_REG_RAX, fake_handle)
+            print(f"  -> 0x{fake_handle:x} (fake file handle)")
+            return fake_handle
+        except:
+            # INVALID_HANDLE_VALUE = -1
+            self.uc.reg_write(UC_X86_REG_RAX, 0xFFFFFFFFFFFFFFFF)
+            return 0xFFFFFFFFFFFFFFFF
+    
+    def _stub_read_file(self):
+        """ReadFile() - заглушка для чтения файла"""
+        # RCX = handle, RDX = buffer, R8 = bytes to read, R9 = bytes read
+        handle = self.uc.reg_read(UC_X86_REG_RCX)
+        buffer = self.uc.reg_read(UC_X86_REG_RDX)
+        size = self.uc.reg_read(UC_X86_REG_R8)
+        
+        print(f"[API] ReadFile(0x{handle:x}, 0x{buffer:x}, {size})")
+        
+        # Записываем нули в буфер (имитация чтения)
+        try:
+            self.uc.mem_write(buffer, b'\x00' * size)
+        except:
+            pass
+        
+        # Возвращаем TRUE (успех)
+        self.uc.reg_write(UC_X86_REG_RAX, 1)
+        print(f"  -> TRUE (fake read)")
+        return 1
+    
+    def _stub_close_handle(self):
+        """CloseHandle() - заглушка для закрытия handle"""
+        handle = self.uc.reg_read(UC_X86_REG_RCX)
+        print(f"[API] CloseHandle(0x{handle:x})")
+        
+        # Всегда успех
+        self.uc.reg_write(UC_X86_REG_RAX, 1)
+        print(f"  -> TRUE")
+        return 1
+    
+    def _stub_message_box_a(self):
+        """MessageBoxA() - заглушка для диалога"""
+        # RCX = hwnd, RDX = text, R8 = caption, R9 = type
+        text_ptr = self.uc.reg_read(UC_X86_REG_RDX)
+        caption_ptr = self.uc.reg_read(UC_X86_REG_R8)
+        
+        try:
+            text = self._read_string(text_ptr)
+            caption = self._read_string(caption_ptr)
+            print(f"[API] MessageBoxA('{caption}', '{text}')")
+        except:
+            print(f"[API] MessageBoxA(...)")
+        
+        # Возвращаем IDOK (1)
+        self.uc.reg_write(UC_X86_REG_RAX, 1)
+        print(f"  -> IDOK (suppressed)")
+        return 1
+    
+    def _stub_sleep(self):
+        """Sleep() - заглушка для задержки"""
+        ms = self.uc.reg_read(UC_X86_REG_RCX)
+        print(f"[API] Sleep({ms} ms)")
+        
+        # Продвигаем виртуальное время вместо реальной задержки
+        ticks = ms * self.emu.clock.cpu_freq_mhz * 1000
+        self.emu.clock.advance(ticks)
+        
+        print(f"  -> advanced {ticks:,} virtual ticks")
+        return 0
+    
+    def _stub_get_system_info(self):
+        """GetSystemInfo() - заглушка для информации о системе"""
+        # RCX = pointer to SYSTEM_INFO
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        print(f"[API] GetSystemInfo(0x{ptr:x})")
+        
+        # Заполняем минимальную структуру SYSTEM_INFO
+        # dwPageSize = 4096, dwNumberOfProcessors = 8, etc.
+        system_info = struct.pack('<IIIQQIIII',
+            4096,      # dwPageSize
+            0x10000,   # lpMinimumApplicationAddress
+            0x7FFFFFFF, # lpMaximumApplicationAddress (low)
+            0,         # lpMaximumApplicationAddress (high)
+            0xFF,      # dwActiveProcessorMask (8 cores)
+            8,         # dwNumberOfProcessors
+            0,         # dwProcessorType
+            4096,      # dwAllocationGranularity
+            0,         # wProcessorLevel
+            0          # wProcessorRevision
+        )
+        
+        try:
+            self.uc.mem_write(ptr, system_info)
+            print(f"  -> filled (8 cores, 4KB pages)")
+        except:
+            pass
+        
+        return 0
+    
+    def _stub_virtual_protect(self):
+        """VirtualProtect() - заглушка для изменения защиты памяти"""
+        # RCX = address, RDX = size, R8 = new protect, R9 = old protect ptr
+        addr = self.uc.reg_read(UC_X86_REG_RCX)
+        size = self.uc.reg_read(UC_X86_REG_RDX)
+        new_protect = self.uc.reg_read(UC_X86_REG_R8)
+        old_protect_ptr = self.uc.reg_read(UC_X86_REG_R9)
+        
+        print(f"[API] VirtualProtect(0x{addr:x}, {size}, 0x{new_protect:x})")
+        
+        # Записываем старую защиту (PAGE_READWRITE)
+        try:
+            self.uc.mem_write(old_protect_ptr, struct.pack('<I', 0x04))
+        except:
+            pass
+        
+        # Возвращаем TRUE
+        self.uc.reg_write(UC_X86_REG_RAX, 1)
+        print(f"  -> TRUE")
+        return 1
+    
+    def _read_string(self, ptr, max_len=256):
+        """Вспомогательная функция: читает null-terminated строку"""
+        data = b''
+        for i in range(max_len):
+            byte = self.uc.mem_read(ptr + i, 1)[0]
+            if byte == 0:
+                break
+            data += bytes([byte])
+        return data.decode('ascii', errors='ignore')
