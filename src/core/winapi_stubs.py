@@ -312,3 +312,26 @@ class WinAPIStubs:
         tick_count = self.emu.clock.get_tick_count() & 0xFFFFFFFF
         self.uc.reg_write(UC_X86_REG_RAX, tick_count)
         print(f"[API] GetTickCount() -> {tick_count} мс")
+
+    def handle_unknown_function(self, func_name):
+        """Мягкая обработка неизвестной функции"""
+        print(f"[API] {func_name}() - NOT IMPLEMENTED")
+        print(f"  -> Returning 1 (success stub)")
+        
+        # Возвращаем "успех" (1 = TRUE/SUCCESS для большинства WinAPI)
+        self.uc.reg_write(UC_X86_REG_RAX, 1)
+        return 1
+    
+    def handle_missing_dll(self, dll_name):
+        """Мягкая обработка отсутствующей DLL"""
+        print(f"[DLL] {dll_name} - NOT FOUND")
+        print(f"  -> Returning NULL (DLL not loaded)")
+        
+        # LoadLibrary возвращает NULL при ошибке
+        self.uc.reg_write(UC_X86_REG_RAX, 0)
+        
+        # Устанавливаем код ошибки ERROR_MOD_NOT_FOUND (126)
+        if hasattr(self.emu.os, 'last_error'):
+            self.emu.os.last_error = 126
+        
+        return 0

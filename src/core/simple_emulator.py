@@ -11,6 +11,7 @@ from unicorn import Uc, UC_ARCH_X86, UC_MODE_64, UC_HOOK_CODE, UC_HOOK_INSN, UC_
 from unicorn.x86_const import *
 from virtual_clock import VirtualClock
 from winapi_stubs import WinAPIStubs
+from mini_kernel import MiniKernel
 import struct
 
 
@@ -37,6 +38,9 @@ class SimpleEmulator:
         # Инициализация стека
         self.uc.reg_write(UC_X86_REG_RSP, self.STACK_BASE + self.STACK_SIZE - 0x1000)
         self.uc.reg_write(UC_X86_REG_RBP, self.STACK_BASE + self.STACK_SIZE - 0x1000)
+        
+        # Минимальное ядро ОС (ПОСЛЕ выделения памяти!)
+        self.kernel = MiniKernel(self)
         
         # WinAPI заглушки (ПОСЛЕ выделения памяти!)
         self.winapi = WinAPIStubs(self)
@@ -132,17 +136,11 @@ class SimpleEmulator:
         
         self.syscalls_intercepted += 1
         
-        # Эмулируем некоторые системные вызовы
-        if syscall_num == 0x33:  # NtQuerySystemTime (GetTickCount64)
-            self._emulate_get_tick_count(uc)
-        elif syscall_num == 0x31:  # NtQueryPerformanceCounter
-            self._emulate_query_performance_counter(uc)
-        else:
-            # Неизвестный системный вызов — возвращаем успех
-            uc.reg_write(UC_X86_REG_RAX, 0)  # STATUS_SUCCESS
+        # Передаём в MiniKernel
+        status = self.kernel.handle_syscall(syscall_num)
         
-        # Латентность системного вызова — примерно 100-200 тактов
-        self.clock.advance(150)
+        # Возвращаем статус в RAX
+        uc.reg_write(UC_X86_REG_RAX, status)
         
         # Пропускаем инструкцию SYSCALL
         rip = uc.reg_read(UC_X86_REG_RIP)

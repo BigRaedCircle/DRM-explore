@@ -14,6 +14,79 @@ import struct
 from collections import defaultdict
 
 
+class Thread:
+    """Виртуальный поток"""
+    
+    def __init__(self, tid, entry_point, stack_base, stack_size):
+        self.tid = tid
+        self.entry_point = entry_point
+        self.stack_base = stack_base
+        self.stack_size = stack_size
+        
+        # Состояние регистров
+        self.registers = {
+            'rip': entry_point,
+            'rsp': stack_base + stack_size - 0x1000,
+            'rbp': stack_base + stack_size - 0x1000,
+        }
+        
+        # Состояние потока
+        self.state = 'ready'  # ready, running, blocked, terminated
+        self.quantum_remaining = 0
+
+
+class ThreadScheduler:
+    """Упрощённый планировщик потоков (Round-Robin)"""
+    
+    def __init__(self, clock):
+        self.clock = clock
+        self.threads = {}  # tid -> Thread
+        self.current_thread = None
+        self.next_tid = 1
+        
+        # Квант времени (в виртуальных тактах)
+        self.quantum_ticks = 10000  # ~3 мкс на 3 GHz
+    
+    def create_thread(self, entry_point, stack_base, stack_size):
+        """Создать новый поток"""
+        tid = self.next_tid
+        self.next_tid += 1
+        
+        thread = Thread(tid, entry_point, stack_base, stack_size)
+        self.threads[tid] = thread
+        
+        return tid
+    
+    def schedule(self):
+        """Выбрать следующий поток (Round-Robin)"""
+        if not self.threads:
+            return None
+        
+        ready_threads = [t for t in self.threads.values() if t.state == 'ready']
+        if not ready_threads:
+            return None
+        
+        next_thread = ready_threads[0]
+        next_thread.state = 'running'
+        next_thread.quantum_remaining = self.quantum_ticks
+        
+        self.current_thread = next_thread
+        return next_thread
+    
+    def yield_thread(self):
+        """Текущий поток отдаёт управление"""
+        if self.current_thread:
+            self.current_thread.state = 'ready'
+            self.current_thread = None
+    
+    def terminate_thread(self, tid):
+        """Завершить поток"""
+        if tid in self.threads:
+            self.threads[tid].state = 'terminated'
+            if self.current_thread and self.current_thread.tid == tid:
+                self.current_thread = None
+
+
 class MemoryPage:
     """Single memory page (4KB)"""
     PAGE_SIZE = 0x1000
@@ -188,9 +261,19 @@ class MiniOS:
         self.vmm = VirtualMemoryManager(uc)
         self.heap = HeapManager(uc, self.vmm)
         
+        # Thread scheduler
+        self.scheduler = ThreadScheduler(clock)
+        
         # OS structures
         self.peb_address = 0x7FFE0000
         self.teb_address = 0x7FFE1000
+        
+        # Syscall table (Nt*/Zw* system calls)
+        self.syscall_table = self._build_syscall_table()
+        self.syscalls_handled = 0
+        
+        # Last error code (для GetLastError/SetLastError)
+        self.last_error = 0
         
         self._setup_os_structures()
     
@@ -209,6 +292,85 @@ class MiniOS:
         # Write minimal TEB structure
         teb_data = struct.pack('<Q', self.peb_address)  # PEB pointer at offset 0x60
         self.uc.mem_write(self.teb_address + 0x60, teb_data)
+    
+    def _build_syscall_table(self):
+        """Построить таблицу системных вызовов Nt*/Zw*"""
+        return {
+            # Управление памятью
+            0x18: self._syscall_allocate_virtual_memory,
+            0x1E: self._syscall_free_virtual_memory,
+            0x50: self._syscall_protect_virtual_memory,
+            
+            # Время
+            0x33: self._syscall_query_system_time,
+            0x31: self._syscall_query_performance_counter,
+            
+            # Потоки
+            0x4E: self._syscall_create_thread,
+            0xB3: self._syscall_terminate_thread,
+            0x34: self._syscall_yield_execution,
+        }
+    
+    def handle_syscall(self, syscall_num):
+        """Обработать системный вызов"""
+        self.syscalls_handled += 1
+        self.clock.advance(150)  # Латентность syscall
+        
+        if syscall_num in self.syscall_table:
+            handler = self.syscall_table[syscall_num]
+            return handler()
+        else:
+            # Неизвестный syscall — возвращаем успех
+            return 0  # STATUS_SUCCESS
+    
+    # === СИСТЕМНЫЕ ВЫЗОВЫ ===
+    
+    def _syscall_allocate_virtual_memory(self):
+        """NtAllocateVirtualMemory"""
+        # Упрощённая реализация
+        size = 0x10000  # 64 KB по умолчанию
+        addr = self.VirtualAlloc(0, size, 0x3000, MemoryPage.PAGE_READWRITE)
+        return 0 if addr else 0xC0000017  # STATUS_NO_MEMORY
+    
+    def _syscall_free_virtual_memory(self):
+        """NtFreeVirtualMemory"""
+        return 0  # STATUS_SUCCESS
+    
+    def _syscall_protect_virtual_memory(self):
+        """NtProtectVirtualMemory"""
+        return 0  # STATUS_SUCCESS
+    
+    def _syscall_query_system_time(self):
+        """NtQuerySystemTime"""
+        # Возвращает виртуальные такты
+        return self.clock.ticks
+    
+    def _syscall_query_performance_counter(self):
+        """NtQueryPerformanceCounter"""
+        return self.clock.query_performance_counter()
+    
+    def _syscall_create_thread(self):
+        """NtCreateThread"""
+        # Упрощённая реализация
+        entry_point = 0x400000  # Заглушка
+        stack_size = 0x100000
+        stack_base = self.VirtualAlloc(0, stack_size, 0x3000, MemoryPage.PAGE_READWRITE)
+        
+        if stack_base:
+            tid = self.scheduler.create_thread(entry_point, stack_base, stack_size)
+            return tid
+        return 0
+    
+    def _syscall_terminate_thread(self):
+        """NtTerminateThread"""
+        if self.scheduler.current_thread:
+            self.scheduler.terminate_thread(self.scheduler.current_thread.tid)
+        return 0  # STATUS_SUCCESS
+    
+    def _syscall_yield_execution(self):
+        """NtYieldExecution"""
+        self.scheduler.yield_thread()
+        return 0  # STATUS_SUCCESS
     
     # === WinAPI implementations ===
     
@@ -288,13 +450,11 @@ class MiniOS:
     
     def GetLastError(self):
         """Get last error code"""
-        # Simplified - always return success
-        return 0
+        return self.last_error
     
     def SetLastError(self, error_code):
         """Set last error code"""
-        # Simplified - ignore for now
-        pass
+        self.last_error = error_code
 
 
 if __name__ == "__main__":
