@@ -24,9 +24,6 @@ class SimpleEmulator:
         # Виртуальные часы
         self.clock = VirtualClock(cpu_freq_mhz)
         
-        # WinAPI заглушки
-        self.winapi = WinAPIStubs(self)
-        
         # Выделяем память (расширенная для PE-файлов)
         self.CODE_BASE = 0x400000
         self.STACK_BASE = 0x7FFF0000
@@ -40,6 +37,9 @@ class SimpleEmulator:
         # Инициализация стека
         self.uc.reg_write(UC_X86_REG_RSP, self.STACK_BASE + self.STACK_SIZE - 0x1000)
         self.uc.reg_write(UC_X86_REG_RBP, self.STACK_BASE + self.STACK_SIZE - 0x1000)
+        
+        # WinAPI заглушки (ПОСЛЕ выделения памяти!)
+        self.winapi = WinAPIStubs(self)
         
         # Установка хуков
         self._setup_hooks()
