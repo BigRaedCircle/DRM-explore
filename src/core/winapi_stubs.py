@@ -89,6 +89,39 @@ class WinAPIStubs:
             # === EXIT ===
             ('ExitProcess', self._stub_exit),
             
+            # === CRITICAL SECTIONS (threading) ===
+            ('InitializeCriticalSectionAndSpinCount', self._stub_init_critical_section),
+            ('EnterCriticalSection', self._stub_enter_critical_section),
+            ('LeaveCriticalSection', self._stub_leave_critical_section),
+            ('DeleteCriticalSection', self._stub_delete_critical_section),
+            
+            # === ERROR HANDLING ===
+            ('GetLastError', self._stub_get_last_error),
+            ('SetLastError', self._stub_set_last_error),
+            
+            # === POINTER ENCODING (security) ===
+            ('EncodePointer', self._stub_encode_pointer),
+            ('DecodePointer', self._stub_decode_pointer),
+            
+            # === FIBER LOCAL STORAGE ===
+            ('FlsAlloc', self._stub_fls_alloc),
+            ('FlsGetValue', self._stub_fls_get_value),
+            ('FlsSetValue', self._stub_fls_set_value),
+            ('FlsFree', self._stub_fls_free),
+            
+            # === STANDARD HANDLES ===
+            ('GetStdHandle', self._stub_get_std_handle),
+            ('GetFileType', self._stub_get_file_type),
+            ('SetHandleCount', self._stub_set_handle_count),
+            
+            # === ENVIRONMENT ===
+            ('GetEnvironmentStringsW', self._stub_get_environment_strings_w),
+            ('FreeEnvironmentStringsW', self._stub_free_environment_strings_w),
+            ('GetModuleFileNameW', self._stub_get_module_filename_w),
+            ('GetACP', self._stub_get_acp),
+            ('GetStartupInfoA', self._stub_get_startup_info_a),
+            ('GetTickCount', self._stub_get_tick_count),
+            
             # === DIRECTX (реалистичные заглушки) ===
             ('D3D11CreateDevice', self._stub_d3d11_create_device),
             ('CreateSwapChain', self._stub_create_swap_chain),
@@ -594,6 +627,227 @@ class WinAPIStubs:
         self.uc.reg_write(UC_X86_REG_RAX, 1)
         print(f"  -> TRUE")
         return 1
+    
+    # === CRITICAL SECTIONS (threading) ===
+    
+    def _stub_init_critical_section(self):
+        """InitializeCriticalSectionAndSpinCount() - initialize critical section"""
+        # RCX = pointer to CRITICAL_SECTION, RDX = spin count
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        spin_count = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        # Just zero out the structure (40 bytes)
+        try:
+            self.uc.mem_write(ptr, b'\x00' * 40)
+        except:
+            pass
+        
+        # Return TRUE
+        self.uc.reg_write(UC_X86_REG_RAX, 1)
+        return 1
+    
+    def _stub_enter_critical_section(self):
+        """EnterCriticalSection() - enter critical section (no-op in single-threaded)"""
+        # RCX = pointer to CRITICAL_SECTION
+        # In single-threaded emulation, this is a no-op
+        return 0
+    
+    def _stub_leave_critical_section(self):
+        """LeaveCriticalSection() - leave critical section (no-op in single-threaded)"""
+        # RCX = pointer to CRITICAL_SECTION
+        # In single-threaded emulation, this is a no-op
+        return 0
+    
+    def _stub_delete_critical_section(self):
+        """DeleteCriticalSection() - delete critical section"""
+        # RCX = pointer to CRITICAL_SECTION
+        # No-op
+        return 0
+    
+    # === ERROR HANDLING ===
+    
+    def _stub_get_last_error(self):
+        """GetLastError() - get last error code"""
+        error = getattr(self.emu.os, 'last_error', 0)
+        self.uc.reg_write(UC_X86_REG_RAX, error)
+        return error
+    
+    def _stub_set_last_error(self):
+        """SetLastError() - set last error code"""
+        # RCX = error code
+        error = self.uc.reg_read(UC_X86_REG_RCX)
+        self.emu.os.last_error = error
+        return 0
+    
+    # === POINTER ENCODING (security) ===
+    
+    def _stub_encode_pointer(self):
+        """EncodePointer() - encode pointer (just return as-is for simplicity)"""
+        # RCX = pointer to encode
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        # In real Windows, this XORs with a secret cookie
+        # For emulation, just return the pointer as-is
+        self.uc.reg_write(UC_X86_REG_RAX, ptr)
+        return ptr
+    
+    def _stub_decode_pointer(self):
+        """DecodePointer() - decode pointer (just return as-is for simplicity)"""
+        # RCX = pointer to decode
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        # In real Windows, this XORs with a secret cookie
+        # For emulation, just return the pointer as-is
+        self.uc.reg_write(UC_X86_REG_RAX, ptr)
+        return ptr
+    
+    # === FIBER LOCAL STORAGE ===
+    
+    def _stub_fls_alloc(self):
+        """FlsAlloc() - allocate fiber local storage index"""
+        # RCX = callback function (optional)
+        # Return a fake FLS index
+        if not hasattr(self, '_fls_counter'):
+            self._fls_counter = 1
+            self._fls_data = {}
+        
+        index = self._fls_counter
+        self._fls_counter += 1
+        self._fls_data[index] = 0
+        
+        self.uc.reg_write(UC_X86_REG_RAX, index)
+        return index
+    
+    def _stub_fls_get_value(self):
+        """FlsGetValue() - get fiber local storage value"""
+        # RCX = FLS index
+        index = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        if not hasattr(self, '_fls_data'):
+            self._fls_data = {}
+        
+        value = self._fls_data.get(index, 0)
+        self.uc.reg_write(UC_X86_REG_RAX, value)
+        return value
+    
+    def _stub_fls_set_value(self):
+        """FlsSetValue() - set fiber local storage value"""
+        # RCX = FLS index, RDX = value
+        index = self.uc.reg_read(UC_X86_REG_RCX)
+        value = self.uc.reg_read(UC_X86_REG_RDX)
+        
+        if not hasattr(self, '_fls_data'):
+            self._fls_data = {}
+        
+        self._fls_data[index] = value
+        self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+        return 1
+    
+    def _stub_fls_free(self):
+        """FlsFree() - free fiber local storage index"""
+        # RCX = FLS index
+        index = self.uc.reg_read(UC_X86_REG_RCX)
+        
+        if hasattr(self, '_fls_data') and index in self._fls_data:
+            del self._fls_data[index]
+        
+        self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+        return 1
+    
+    # === STANDARD HANDLES ===
+    
+    def _stub_get_std_handle(self):
+        """GetStdHandle() - get standard handle"""
+        # RCX = std handle type (-10 = stdin, -11 = stdout, -12 = stderr)
+        std_type = self.uc.reg_read(UC_X86_REG_RCX) & 0xFFFFFFFF
+        
+        # Return fake handles
+        if std_type == 0xFFFFFFF6:  # STD_INPUT_HANDLE (-10)
+            handle = 0x3
+        elif std_type == 0xFFFFFFF5:  # STD_OUTPUT_HANDLE (-11)
+            handle = 0x7
+        elif std_type == 0xFFFFFFF4:  # STD_ERROR_HANDLE (-12)
+            handle = 0xB
+        else:
+            handle = 0
+        
+        self.uc.reg_write(UC_X86_REG_RAX, handle)
+        return handle
+    
+    def _stub_get_file_type(self):
+        """GetFileType() - get file type"""
+        # RCX = file handle
+        # Return FILE_TYPE_CHAR (0x0002) for console
+        self.uc.reg_write(UC_X86_REG_RAX, 0x0002)
+        return 0x0002
+    
+    def _stub_set_handle_count(self):
+        """SetHandleCount() - set handle count (legacy function)"""
+        # RCX = number of handles
+        # Just return the same number
+        count = self.uc.reg_read(UC_X86_REG_RCX)
+        self.uc.reg_write(UC_X86_REG_RAX, count)
+        return count
+    
+    # === ENVIRONMENT ===
+    
+    def _stub_get_environment_strings_w(self):
+        """GetEnvironmentStringsW() - get environment strings"""
+        # Return pointer to empty environment block (just double null terminator)
+        if not hasattr(self, '_env_strings_ptr'):
+            # Allocate memory for environment strings
+            env_data = b'\x00\x00\x00\x00'  # Empty environment (double null)
+            self._env_strings_ptr = self.emu.os.HeapAlloc(self.emu.os.heap.process_heap, 0, len(env_data))
+            self.uc.mem_write(self._env_strings_ptr, env_data)
+        
+        self.uc.reg_write(UC_X86_REG_RAX, self._env_strings_ptr)
+        return self._env_strings_ptr
+    
+    def _stub_free_environment_strings_w(self):
+        """FreeEnvironmentStringsW() - free environment strings"""
+        # RCX = pointer to environment strings
+        # No-op (we don't actually free it)
+        self.uc.reg_write(UC_X86_REG_RAX, 1)  # TRUE
+        return 1
+    
+    def _stub_get_module_filename_w(self):
+        """GetModuleFileNameW() - get module file name"""
+        # RCX = module handle, RDX = buffer, R8 = buffer size
+        buffer = self.uc.reg_read(UC_X86_REG_RDX)
+        size = self.uc.reg_read(UC_X86_REG_R8)
+        
+        # Write fake module name
+        module_name = "C:\\cpuz.exe\x00".encode('utf-16le')
+        try:
+            self.uc.mem_write(buffer, module_name[:size*2])
+        except:
+            pass
+        
+        # Return length (in characters, not bytes)
+        length = len(module_name) // 2 - 1  # Exclude null terminator
+        self.uc.reg_write(UC_X86_REG_RAX, length)
+        return length
+    
+    def _stub_get_acp(self):
+        """GetACP() - get active code page"""
+        # Return 1252 (Western European)
+        self.uc.reg_write(UC_X86_REG_RAX, 1252)
+        return 1252
+    
+    def _stub_get_startup_info_a(self):
+        """GetStartupInfoA() - get startup info (ANSI version)"""
+        # RCX = pointer to STARTUPINFOA
+        ptr = self.uc.reg_read(UC_X86_REG_RCX)
+        # Zero out structure (68 bytes for STARTUPINFOA)
+        try:
+            self.uc.mem_write(ptr, b'\x00' * 68)
+        except:
+            pass
+        return 0
+    
+    def _stub_get_tick_count(self):
+        """GetTickCount() - returns milliseconds (32-bit)"""
+        tick_count = self.emu.clock.get_tick_count() & 0xFFFFFFFF
+        self.uc.reg_write(UC_X86_REG_RAX, tick_count)
+        return tick_count
     
     # === DIRECTX STUBS (реалистичные) ===
     
