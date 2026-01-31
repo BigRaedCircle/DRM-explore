@@ -80,8 +80,11 @@ class LayeredEmulator:
             print(f"[MEM] Warning: Could not map RDTSC memory: {e}")
         
         # Выделение памяти для заглушек WinAPI (ПЕРЕД созданием WinAPIStubs!)
+        # Выделяем 1GB для всех заглушек (основных + dummy от PE Loader)
         STUB_BASE = 0x7FFF0000
-        self.uc.mem_map(STUB_BASE, 0x10000)
+        STUB_SIZE = 0x40000000  # 1GB
+        self.uc.mem_map(STUB_BASE, STUB_SIZE)
+        print(f"[MEM] Mapped {STUB_SIZE//(1024*1024)}MB at 0x{STUB_BASE:x} for WinAPI stubs")
         
         # WinAPI заглушки (теперь используют MiniOS)
         self.winapi = WinAPIStubs(self)

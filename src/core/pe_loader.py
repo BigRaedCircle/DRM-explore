@@ -105,7 +105,13 @@ class PELoader:
                     try:
                         self.emu.uc.mem_write(iat_address, stub_addr.to_bytes(8, 'little'))
                         patched_count += 1
-                        print(f"      [+] {func_name:<30} @ 0x{iat_address:x} -> 0x{stub_addr:x}")
+                        
+                        # Проверяем, что записали
+                        written = int.from_bytes(self.emu.uc.mem_read(iat_address, 8), 'little')
+                        if written != stub_addr:
+                            print(f"      [!] {func_name:<30} @ 0x{iat_address:x} -> MISMATCH! wrote 0x{stub_addr:x}, read 0x{written:x}")
+                        else:
+                            print(f"      [+] {func_name:<30} @ 0x{iat_address:x} -> 0x{stub_addr:x}")
                     except Exception as e:
                         print(f"      [-] {func_name:<30} @ 0x{iat_address:x} (patch error: {e})")
                 else:
@@ -126,27 +132,27 @@ class PELoader:
         if not hasattr(self, '_dummy_stub_counter'):
             self._dummy_stub_counter = 0
             self._dummy_stub_names = {}  # Map address -> function name
-            # Выделяем память для dummy stubs (64KB должно хватить)
-            try:
-                dummy_region_base = self.emu.winapi.STUB_BASE + 0xF000
-                dummy_region_size = 0x10000  # 64KB
-                self.emu.uc.mem_map(dummy_region_base, dummy_region_size)
-                print(f"      [*] Allocated dummy stub region: 0x{dummy_region_base:x} ({dummy_region_size} bytes)")
-            except Exception as e:
-                # Память уже выделена или ошибка
-                pass
+            # Dummy stubs уже в основной stub region (1GB), не нужно выделять отдельно
         
-        dummy_base = self.emu.winapi.STUB_BASE + 0xF000 + (self._dummy_stub_counter * 16)
+        # Используем адреса после основных заглушек
+        # Основные заглушки: 474 × 256 = 121,344 байт
+        # Начинаем dummy stubs с offset 0x20000 (128KB)
+        dummy_base = self.emu.winapi.STUB_BASE + 0x20000 + (self._dummy_stub_counter * 16)
         self._dummy_stub_counter += 1
         
         # Save function name for this stub
         self._dummy_stub_names[dummy_base] = func_name
         
-        # Write smarter stub: MOV RAX, 1; RET (возвращаем SUCCESS вместо NULL)
-        # Большинство WinAPI функций возвращают TRUE (1) при успехе
+        print(f"      [DUMMY] {func_name:<30} @ 0x{dummy_base:x}")
+        
+        # Write smarter stub: INT3 + RET (будет перехвачен hook)
+        # Заполняем все 16 байт безопасными инструкциями
         stub_code = bytes([
-            0x48, 0xC7, 0xC0, 0x01, 0x00, 0x00, 0x00,  # MOV RAX, 1
+            0xCC,              # INT3 - breakpoint (будет перехвачен)
             0xC3,              # RET
+            # Остальные байты - тоже RET на случай если что-то пойдёт не так
+            0xC3, 0xC3, 0xC3, 0xC3, 0xC3, 0xC3, 0xC3, 0xC3,
+            0xC3, 0xC3, 0xC3, 0xC3, 0xC3, 0xC3,
         ])
         
         try:

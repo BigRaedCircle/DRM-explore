@@ -393,10 +393,28 @@ class MiniOS:
     def VirtualAlloc(self, address, size, allocation_type, protect):
         """Allocate virtual memory"""
         if address == 0:
-            # Let system choose address
-            address = 0x20000000 + len(self.vmm.allocations) * 0x100000
+            # Система выбирает адрес сама
+            # Используем диапазон 0x20000000 - 0x60000000 (1GB)
+            # Ищем свободное место
+            if not hasattr(self, '_next_virtual_alloc'):
+                self._next_virtual_alloc = 0x20000000
+            
+            address = self._next_virtual_alloc
+            
+            # Выравниваем размер
+            aligned_size = ((size + 0xFFF) // 0x1000) * 0x1000
+            
+            # Обновляем следующий адрес
+            self._next_virtual_alloc += aligned_size
+            
+            # Проверяем, не вышли ли за пределы
+            if self._next_virtual_alloc > 0x60000000:
+                print(f"[!] VirtualAlloc: Out of address space!")
+                return 0
+        else:
+            aligned_size = ((size + 0xFFF) // 0x1000) * 0x1000
         
-        return self.vmm.allocate(address, size, protect)
+        return self.vmm.allocate(address, aligned_size, protect)
     
     def VirtualFree(self, address, size, free_type):
         """Free virtual memory"""

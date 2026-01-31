@@ -68,10 +68,23 @@ class VirtualClock:
         Возвращает: 64-битное значение FILETIME (100-наносекундные интервалы)
         """
         # FILETIME = 100ns интервалы с 1 января 1601
-        # Для простоты возвращаем производное от ticks
+        # Используем реальное время + виртуальное смещение
+        import time
+        
+        # Разница между 1 января 1601 и 1 января 1970 (Unix epoch)
+        FILETIME_UNIX_DIFF = 116444736000000000  # в 100ns единицах
+        
+        # Текущее время Unix
+        unix_time = time.time()
+        
+        # Конвертируем в FILETIME (100ns единицы)
+        filetime = int(unix_time * 10000000) + FILETIME_UNIX_DIFF
+        
+        # Добавляем виртуальное смещение от ticks
         ns_per_tick = 1_000_000_000 // self.cpu_freq_hz
-        filetime_units = (self.ticks * ns_per_tick) // 100
-        return filetime_units
+        virtual_offset = (self.ticks * ns_per_tick) // 100
+        
+        return filetime + virtual_offset
     
     def __repr__(self):
         return (f"VirtualClock(ticks={self.ticks:,}, "
