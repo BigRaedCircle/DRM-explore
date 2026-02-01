@@ -21,6 +21,7 @@ from virtual_clock import VirtualClock
 from mini_os import MiniOS
 from winapi_stubs_v2 import WinAPIStubsV2
 from pe_loader import PELoader
+from unicorn_rep_fix import UnicornRepFix  # HOTFIX для REP инструкций
 
 
 class LayeredEmulatorV2:
@@ -34,6 +35,11 @@ class LayeredEmulatorV2:
         self.instruction_count = 0
         self.syscall_count = 0
         self.pending_restart_rip = None
+        self.program_exited = False
+        self.exit_code = 0
+        
+        # HOTFIX для REP инструкций
+        self.rep_fix = UnicornRepFix(self.uc)
         
         # Детектор зацикливания
         self.last_rip_history = []
@@ -115,6 +121,16 @@ class LayeredEmulatorV2:
     def _hook_code(self, uc, address, size, user_data):
         """Hook на каждую инструкцию"""
         self.instruction_count += 1
+        
+        # HOTFIX: Проверяем и обрабатываем REP инструкции
+        # ВАЖНО: Проверяем ПЕРЕД тем как Unicorn попытается выполнить
+        if self.rep_fix.check_and_handle_rep(address):
+            # REP инструкция была обработана
+            # Останавливаем эмуляцию и перезапускаем с нового RIP
+            new_rip = uc.reg_read(UC_X86_REG_RIP)
+            self.pending_restart_rip = new_rip
+            uc.emu_stop()
+            return
         
         # Детектируем вход в stub region
         STUB_BASE = 0x7FFF0000
@@ -352,6 +368,7 @@ def test_simple_sysinfo():
         print(f"    Exit code: {exit_code}")
         print(f"    Instructions: {emu.instruction_count:,}")
         print(f"    Syscalls: {emu.syscall_count:,}")
+        print(f"    REP instructions handled: {emu.rep_fix.rep_instructions_handled}")
         
         if exit_code == 0:
             print(f"\n[SUCCESS] Program executed successfully!")
