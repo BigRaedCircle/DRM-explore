@@ -104,14 +104,18 @@ class UnicornRepFix:
         # Обновляем регистры
         self.uc.reg_write(UC_X86_REG_RDI, rdi + rcx)
         self.uc.reg_write(UC_X86_REG_RCX, 0)
-        self.uc.reg_write(UC_X86_REG_RIP, address + 2)
+        
+        # ВАЖНО: Заменяем REP STOSB на NOP чтобы Unicorn не выполнил его снова
+        self.uc.mem_write(address, b'\x90\x90')  # NOP NOP
+        
+        # НЕ меняем RIP - пусть Unicorn выполнит NOP
         
         self.rep_instructions_handled += 1
         
         if self.verbose:
-            print(f"[REP_FIX] rep stosb: wrote {rcx} bytes of 0x{al:02x} to 0x{rdi:x}")
+            print(f"[REP_FIX] rep stosb: wrote {rcx} bytes of 0x{al:02x} to 0x{rdi:x}, replaced with NOP")
         
-        return True
+        return False  # Продолжаем нормально, Unicorn выполнит NOP
     
     def _handle_rep_stosw(self, address):
         """REP STOSW - заполнение памяти словом (2 байта)"""
